@@ -191,6 +191,65 @@ def test_run_python_has_no_secrets(ctx, monkeypatch):
     assert "[]" in out
 
 
+_REQUIRE = bool(os.environ.get("AGENTE_REQUIRE_ISOLATION"))
+needs_fs = pytest.mark.skipif(not code_t.fs_isolation_available() and not _REQUIRE,
+                              reason="Landlock no disponible en este host")
+
+
+@needs_fs
+def test_sandbox_blocks_filesystem_outside_workspace(ctx):
+    """Escenario del hallazgo P1 de Codex: borrar/modificar archivos fuera del espacio de trabajo."""
+    victim = ctx.settings.data_dir / "victima.txt"
+    victim.write_text("intacto")
+    db_file = ctx.settings.db_path
+    db_file.write_bytes(b"SQLite format 3\x00original")
+    out = code_t.run_python(ctx, f"""
+import os
+res = []
+for fn in (lambda: os.remove({str(victim)!r}),
+           lambda: open({str(db_file)!r}, 'ab').write(b'x'),
+           lambda: open({str(db_file)!r}, 'rb').read(),
+           lambda: open('/proc/%d/environ' % os.getppid(), 'rb').read(),
+           lambda: os.listdir({str(ctx.settings.data_dir)!r})):
+    try:
+        fn(); res.append('PERMITIDO')
+    except OSError:
+        res.append('DENEGADO')
+open('propio.txt', 'w').write('ok')
+print(res)
+""")
+    assert "archivos=AISLADOS" in out
+    assert "PERMITIDO" not in out and out.count("DENEGADO") == 5, out
+    assert victim.read_text() == "intacto"
+    assert db_file.read_bytes() == b"SQLite format 3\x00original"
+    assert (ctx.workspace / "propio.txt").read_text() == "ok"
+
+
+@needs_fs
+def test_sandbox_shared_folder_is_read_only(ctx):
+    shared = ctx.settings.workspace_dir / "compartido"
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / "lista.csv").write_text("a,b\n1,2\n")
+    out = code_t.run_python(ctx, f"""
+print(open({str(shared / 'lista.csv')!r}).read().strip().splitlines()[-1])
+try:
+    open({str(shared / 'lista.csv')!r}, 'w').write('borrado')
+    print('ESCRIBIO')
+except OSError:
+    print('SOLO_LECTURA')
+""")
+    assert "1,2" in out and "SOLO_LECTURA" in out
+    assert (shared / "lista.csv").read_text() == "a,b\n1,2\n"
+
+
+def test_code_without_fs_isolation_always_needs_approval(ctx, monkeypatch):
+    from agente.tools import build_registry
+    t = build_registry()["run_python"]
+    monkeypatch.setattr(code_t, "fs_isolation_available", lambda: False)
+    monkeypatch.setattr(code_t, "network_isolation_available", lambda: True)
+    assert "sistema de archivos" in t.needs_approval(ctx, {"code": "print(1)"})
+
+
 def test_run_python_timeout(ctx):
     with pytest.raises(ToolError, match="tiempo agotado"):
         code_t.run_python(ctx, "while True: pass", timeout=5)

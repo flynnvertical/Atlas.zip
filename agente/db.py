@@ -120,6 +120,13 @@ CREATE TABLE IF NOT EXISTS outbox (
     created REAL NOT NULL
 );
 
+-- Buzón de entrada del webhook: se escribe ANTES de confirmar a Telegram (no se pierde si se reinicia).
+CREATE TABLE IF NOT EXISTS inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    payload TEXT NOT NULL,
+    received REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS processed_updates (update_id INTEGER PRIMARY KEY, ts REAL NOT NULL);
 """
 

@@ -257,8 +257,28 @@ class App:
         return "Comando no reconocido o incompleto. /ayuda"
 
     # ------------------------------------------------------------------ procesamiento
+    # -- pausa por cuota ----------------------------------------------------------
+    def quota_paused_until(self) -> float:
+        return float(self.db.kv_get("quota_until", "0") or 0)
+
+    def _pause_for_quota(self, err: Exception) -> float:
+        """Espera exponencial ante 429 (5 min → 1 h); hasta la medianoche UTC si se alcanzó el tope propio."""
+        now = time.time()
+        if "Tope diario" in str(err):
+            until = (int(now // 86400) + 1) * 86400 + 60
+        else:
+            strikes = int(self.db.kv_get("quota_strikes", "0") or 0) + 1
+            self.db.kv_set("quota_strikes", str(strikes))
+            until = now + min(3600, 300 * 2 ** (strikes - 1))
+        self.db.kv_set("quota_until", str(until))
+        return until
+
     def process_jobs(self, deadline: float) -> dict:
         stats = {"done": 0, "failed": 0, "waiting": 0, "requeued": 0, "quota": False}
+        paused = self.quota_paused_until()
+        if paused > time.time():
+            stats.update(quota=True, paused_until=paused)
+            return stats  # sin llamadas al modelo hasta que venza la pausa
         while time.time() < deadline:
             job = claim_next(self.db)
             if not job:
@@ -267,6 +287,7 @@ class App:
                 out = self.agent.run_job(job)
             except QuotaExhausted as e:
                 stats["quota"] = True
+                stats["paused_until"] = self._pause_for_quota(e)
                 self.db.log("warn", "quota", str(e)[:300], job["id"])
                 if not self.db.kv_get(f"quota_warned:{time.strftime('%Y-%m-%d')}"):
                     self.db.kv_set(f"quota_warned:{time.strftime('%Y-%m-%d')}", "1")
@@ -285,6 +306,7 @@ class App:
                 continue
             if out.status in ("done", "failed"):
                 stats[out.status] += 1
+                self.db.kv_set("quota_strikes", "0")  # el modelo respondió: se reinicia la espera
                 header = f"🧾 Trabajo #{out.job_id}\n"
                 self.outbox.put(job["chat_id"], header + out.text)
                 for f in out.files[:10]:

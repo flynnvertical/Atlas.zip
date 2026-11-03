@@ -154,6 +154,7 @@ def test_code_after_untrusted_content_needs_approval_without_isolation(ctx, monk
     from agente.tools import build_registry
     from agente.tools import code as code_t
     t = build_registry()["run_python"]
+    monkeypatch.setattr(code_t, "fs_isolation_available", lambda: True)
     monkeypatch.setattr(code_t, "network_isolation_available", lambda: False)
     assert t.needs_approval(ctx, {"code": "print(1)"}) is None
     ctx.tainted = True

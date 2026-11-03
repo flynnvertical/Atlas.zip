@@ -9,6 +9,7 @@ import resource
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -53,6 +54,56 @@ def network_isolation_available() -> bool:
     return bool(isolation_prefix())
 
 
+BOOT = Path(__file__).resolve().parent.parent / "sandbox_boot.py"
+_FS_OK: bool | None = None
+_FS_PROBE = """
+import os, sys
+ok = []
+def denied(fn):
+    try:
+        fn(); return False
+    except OSError:
+        return True
+ok.append(denied(lambda: open(sys.argv[1]).read()))                       # leer fuera
+ok.append(denied(lambda: open(sys.argv[2], 'w').write('x')))              # escribir fuera
+ok.append(denied(lambda: open('/proc/%d/environ' % os.getppid(), 'rb').read()))  # entorno del padre
+open('dentro.txt', 'w').write('ok'); ok.append(open('dentro.txt').read() == 'ok')
+print('FS_OK' if all(ok) else 'FS_FALLA %s' % ok)
+"""
+
+
+def _sandbox_cmd(workspace: Path, shared: Path | None, script: str, isolate_net: bool, isolate_fs: bool) -> list[str]:
+    cmd = list(isolation_prefix()) if isolate_net else []
+    if isolate_fs:
+        return cmd + [sys.executable, "-I", str(BOOT), str(workspace), str(shared) if shared else "-", script]
+    return cmd + [sys.executable, "-I", script]
+
+
+def fs_isolation_available() -> bool:
+    """Verifica con intentos reales que el sandbox impide leer/escribir fuera del espacio de trabajo
+    y leer el entorno de otros procesos (Landlock). Se cachea por proceso."""
+    global _FS_OK
+    if _FS_OK is None:
+        _FS_OK = False
+        if not BOOT.exists() or not sys.platform.startswith("linux"):
+            return False
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ws = base / "ws"
+            ws.mkdir()
+            secret = base / "secreto.txt"
+            secret.write_text("no deberias verme")
+            (ws / "_probe.py").write_text(_FS_PROBE)
+            try:
+                cmd = _sandbox_cmd(ws, None, "_probe.py", network_isolation_available(), True)
+                r = subprocess.run(cmd + [str(secret), str(base / "escrito.txt")],
+                                   cwd=ws, capture_output=True, timeout=30, env=safe_env_for_subprocess())
+                _FS_OK = r.returncode == 0 and r.stdout.strip() == b"FS_OK" and not (base / "escrito.txt").exists()
+            except (OSError, subprocess.SubprocessError):
+                _FS_OK = False
+    return _FS_OK
+
+
 def _limits(cpu: int, mem_mb: int):
     def apply():
         resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu + 2))
@@ -64,11 +115,14 @@ def _limits(cpu: int, mem_mb: int):
 def run_python(ctx: ToolContext, code: str, timeout: int = 60) -> str:
     timeout = max(5, min(int(timeout), 120))
     ctx.workspace.mkdir(parents=True, exist_ok=True)
-    script = ctx.workspace / f"_script_{int(time.time() * 1000)}.py"
+    name = f"_script_{int(time.time() * 1000)}.py"
+    script = ctx.workspace / name
     script.write_text(code, encoding="utf-8")
-    isolated = network_isolation_available() and not ctx.settings.sandbox_network
-    ctx.sandbox_isolated = isolated
-    cmd = (isolation_prefix() if isolated else []) + [sys.executable, "-I", str(script.name)]
+    net = network_isolation_available() and not ctx.settings.sandbox_network
+    fs = fs_isolation_available()
+    ctx.sandbox_isolated = net and fs
+    shared = Path(ctx.settings.workspace_dir) / "compartido"
+    cmd = _sandbox_cmd(ctx.workspace, shared if shared.exists() else None, name, net, fs)
     before = {p for p in ctx.workspace.rglob("*") if p.is_file()}
     t0 = time.time()
     try:
@@ -79,6 +133,7 @@ def run_python(ctx: ToolContext, code: str, timeout: int = 60) -> str:
         raise ToolError(f"tiempo agotado ({timeout}s)")
     finally:
         script.unlink(missing_ok=True)
+        shutil.rmtree(ctx.workspace / ".tmp", ignore_errors=True)
     elapsed = time.time() - t0
     new_files = []
     for p in ctx.workspace.rglob("*"):
@@ -87,7 +142,8 @@ def run_python(ctx: ToolContext, code: str, timeout: int = 60) -> str:
             new_files.append(rel)
             if rel not in ctx.created_files:
                 ctx.created_files.append(rel)
-    res = (f"exit={code_ret} | {elapsed:.1f}s | red={'BLOQUEADA' if isolated else 'disponible'}\n"
+    res = (f"exit={code_ret} | {elapsed:.1f}s | red={'BLOQUEADA' if net else 'disponible'} | "
+           f"archivos={'AISLADOS' if fs else 'SIN AISLAR'}\n"
            f"--- stdout ---\n{out[-6000:]}\n")
     if err.strip():
         res += f"--- stderr ---\n{err[-3000:]}\n"
@@ -97,6 +153,9 @@ def run_python(ctx: ToolContext, code: str, timeout: int = 60) -> str:
 
 
 def _code_policy(ctx: ToolContext, args: dict) -> str | None:
+    if not fs_isolation_available():
+        return ("ejecución de código sin aislamiento del sistema de archivos (podría leer o modificar "
+                "datos del agente u otros archivos)")
     if not network_isolation_available() and ctx.tainted:
         return ("ejecución de código sin aislamiento de red después de leer contenido externo "
                 "(riesgo de exfiltración por inyección)")

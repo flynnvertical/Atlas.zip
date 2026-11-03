@@ -158,8 +158,15 @@ class Agent:
                        counters=json.dumps(counters), **extra)
 
         def llm_call(msgs, **kw):
+            try:
+                msg = self.llm.chat(msgs, **kw)
+            except QuotaExhausted:
+                raise  # no se hizo ninguna llamada: no consume presupuesto del trabajo
+            except LLMError:
+                counters["llm_calls"] += 1
+                raise
             counters["llm_calls"] += 1
-            return self.llm.chat(msgs, **kw)
+            return msg
 
         messages: list[dict] = json.loads(job.get("messages") or "[]")
         try:
@@ -331,14 +338,17 @@ class Agent:
                     "SELECT tool,status FROM action_log WHERE job_id=? ORDER BY id", (job["id"],))][-30:],
             }
             try:
-                counters["llm_calls"] += 1
                 ok, probs = audit(self.llm, job["objective"], plan.get("criterios_exito", []), answer, evidence)
+                counters["llm_calls"] += 1
                 v.auditor = "aprobó" if ok else "objetó"
                 v.checks.append("auditor independiente")
                 if not ok:
                     v.passed = False
                     v.issues += probs
+            except QuotaExhausted:
+                v.auditor = "no disponible (cuota agotada)"
             except LLMError as e:
+                counters["llm_calls"] += 1
                 v.auditor = f"no disponible ({str(e)[:60]})"
         if v.passed or counters["revisions"] >= self.s.budget.max_revisions:
             return v

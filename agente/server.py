@@ -10,7 +10,6 @@ from __future__ import annotations
 import hmac
 import json
 import os
-import queue
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +23,6 @@ class Worker(threading.Thread):
     def __init__(self, settings: Settings, messenger, sync=None, llm=None, slice_seconds: int = 90):
         super().__init__(daemon=True)
         self.s, self.messenger, self.sync, self.llm = settings, messenger, sync, llm
-        self.updates: "queue.Queue[dict]" = queue.Queue()
         self.wake = threading.Event()
         self.slice = slice_seconds
         self.ready = threading.Event()
@@ -48,11 +46,8 @@ class Worker(threading.Thread):
         self.ready.set()
         while not self.stop.is_set():
             try:
-                while True:
-                    try:
-                        app.handle_update(self.updates.get_nowait())
-                    except queue.Empty:
-                        break
+                if self.drain_inbox(app) and self.sync:
+                    self.sync.push()  # persistir enseguida lo recibido, antes de trabajos largos
                 app.outbox.flush()
                 run_due_schedules(app.db, self.s.timezone)
                 app.process_jobs(time.time() + self.slice)
@@ -65,9 +60,38 @@ class Worker(threading.Thread):
                 self.last_error = redact(f"{type(e).__name__}: {e}")[:200]
                 print("ERROR en ciclo:", self.last_error, flush=True)
             pending = app.db.one("SELECT COUNT(*) c FROM jobs WHERE status='queued'")["c"]
-            if not pending:
-                self.wake.wait(timeout=60)
+            paused = app.quota_paused_until() - time.time()
+            if not pending or paused > 0:
+                # Con cuota agotada no se reintenta en bucle: se despierta por mensajes nuevos
+                # (comandos como /estado siguen funcionando) o al vencer la pausa.
+                self.wake.wait(timeout=min(60, paused) if paused > 0 else 60)
                 self.wake.clear()
+
+
+    @staticmethod
+    def drain_inbox(app) -> int:
+        """Procesa el buzón en orden. Cada fila se borra recién después de manejarla; si el proceso
+        se corta antes, se reprocesa y handle_update la deduplica por update_id."""
+        n = 0
+        for row in app.db.all("SELECT id, payload FROM inbox ORDER BY id LIMIT 100"):
+            try:
+                app.handle_update(json.loads(row["payload"]))
+            except ValueError:
+                app.db.log("warn", "inbox_invalido", str(row["id"]))
+            app.db.execute("DELETE FROM inbox WHERE id=?", (row["id"],))
+            n += 1
+        return n
+
+
+def store_update(db_path, payload: bytes) -> None:
+    """Escritura durable e independiente del hilo trabajador (conexión propia, commit inmediato)."""
+    import sqlite3
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    try:
+        conn.execute("INSERT INTO inbox(payload, received) VALUES(?, ?)", (payload.decode("utf-8"), time.time()))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def make_handler(worker: Worker, secret: str, tick_key: str | None):
@@ -103,13 +127,19 @@ def make_handler(worker: Worker, secret: str, tick_key: str | None):
             n = int(self.headers.get("Content-Length") or 0)
             if n > 1_000_000:
                 return self._send(413, b"no")
+            raw = self.rfile.read(n) or b"{}"
             try:
-                upd = json.loads(self.rfile.read(n) or b"{}")
+                json.loads(raw)
             except ValueError:
                 return self._send(400, b"no")
-            worker.updates.put(upd)
+            if not worker.is_alive() or not hasattr(worker, "app"):
+                return self._send(503, b"no")  # Telegram reintentará más tarde
+            try:
+                store_update(worker.s.db_path, raw)  # durable ANTES de confirmar
+            except Exception:  # noqa: BLE001
+                return self._send(503, b"no")
             worker.wake.set()
-            return self._send(200)  # responder rápido: Telegram reintenta si tarda
+            return self._send(200)
     return H
 
 

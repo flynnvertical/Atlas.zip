@@ -139,3 +139,108 @@ def test_webhook_requires_strong_secret(settings, monkeypatch):
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "corto")
     with pytest.raises(SystemExit):
         serve(settings, None, port=0)
+
+
+# --- hallazgo P1 (Codex): espera ante cuota agotada ---------------------------------
+def test_quota_pauses_processing_without_burning_budget(settings, db):
+    from agente.app import App
+    from agente.llm import QuotaExhausted
+    from agente.scheduler import enqueue
+    llm = ScriptedLLM([QuotaExhausted("Todos los proveedores devolvieron 429")])
+    app = App(settings, db=db, llm=llm, messenger=None)
+    jid = enqueue(db, 111, "tarea")
+    st = app.process_jobs(time.time() + 30)
+    assert st["quota"] and 250 < st["paused_until"] - time.time() <= 300
+    # durante la pausa no se vuelve a llamar al modelo (el guion vacío fallaría si se llamara)
+    st2 = app.process_jobs(time.time() + 30)
+    assert st2["quota"] and len(llm.calls) == 1
+    job = db.one("SELECT * FROM jobs WHERE id=?", (jid,))
+    assert job["status"] == "queued" and json.loads(job["counters"] or "{}").get("llm_calls", 0) == 0
+
+
+def test_daily_cap_pauses_until_next_utc_day(settings, db):
+    from agente.app import App
+    from agente.llm import QuotaExhausted
+    from agente.scheduler import enqueue
+    app = App(settings, db=db, llm=ScriptedLLM([QuotaExhausted("Tope diario propio alcanzado (120 llamadas).")]))
+    enqueue(db, 111, "tarea")
+    until = app.process_jobs(time.time() + 30)["paused_until"]
+    assert until % 86400 == 60 and until > time.time()
+
+
+def test_server_worker_does_not_spin_on_quota(settings, server, monkeypatch):
+    from agente.llm import QuotaExhausted
+    from agente.server import serve
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secreto-webhook-1234567")
+    api = FakeBotAPI(server, [])
+    llm = ScriptedLLM([QuotaExhausted("429")] * 50)
+    httpd = serve(settings, Telegram("TEST:TOKEN", api_base=api.srv.url), sync=None, port=0, llm=llm)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        r = requests.post(base + "/telegram", data=json.dumps(msg(text="tarea", update_id=5)),
+                          headers={"X-Telegram-Bot-Api-Secret-Token": "secreto-webhook-1234567"})
+        assert r.status_code == 200
+        time.sleep(2.5)
+        assert len(llm.calls) == 1  # antes de la corrección: decenas de reintentos por segundo
+        # los comandos siguen respondiendo durante la pausa
+        requests.post(base + "/telegram", data=json.dumps(msg(text="/estado", update_id=6)),
+                      headers={"X-Telegram-Bot-Api-Secret-Token": "secreto-webhook-1234567"})
+        for _ in range(50):
+            if any("Estado" in m["text"] for m in api.sent):
+                break
+            time.sleep(0.1)
+        assert any("Estado" in m["text"] for m in api.sent)
+    finally:
+        httpd.worker.stop.set()
+        httpd.worker.wake.set()
+        httpd.shutdown()
+
+
+# --- hallazgo P2 (Codex): buzón durable del webhook ---------------------------------
+def test_webhook_update_survives_restart_before_processing(settings, server, monkeypatch):
+    from agente.app import App
+    from agente.server import Worker, serve
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secreto-webhook-1234567")
+    monkeypatch.setattr(Worker, "drain_inbox", staticmethod(lambda app: 0))  # "cae" antes de procesar
+    api = FakeBotAPI(server, [])
+    httpd = serve(settings, Telegram("TEST:TOKEN", api_base=api.srv.url), sync=None, port=0, llm=ScriptedLLM([]))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        r = requests.post(base + "/telegram", data=json.dumps(msg(text="investigá algo", update_id=9)),
+                          headers={"X-Telegram-Bot-Api-Secret-Token": "secreto-webhook-1234567"})
+        assert r.status_code == 200
+    finally:
+        httpd.worker.stop.set()
+        httpd.worker.wake.set()
+        httpd.shutdown()
+    monkeypatch.undo()
+    # "reinicio": proceso nuevo sobre la misma base -> el mensaje confirmado no se perdió
+    d2 = DB(settings.db_path)
+    app2 = App(settings, db=d2, llm=ScriptedLLM([]), messenger=None)
+    assert Worker.drain_inbox(app2) == 1
+    assert d2.one("SELECT COUNT(*) c FROM jobs")["c"] == 1
+    d2.execute("INSERT INTO inbox(payload, received) VALUES(?, ?)",
+               (json.dumps(msg(text="investigá algo", update_id=9)), time.time()))  # reentrega
+    Worker.drain_inbox(app2)
+    assert d2.one("SELECT COUNT(*) c FROM jobs")["c"] == 1  # sin duplicados
+
+
+def test_webhook_returns_503_when_worker_is_down(settings, monkeypatch):
+    from agente.server import make_handler
+    from http.server import ThreadingHTTPServer
+
+    class Dead:
+        s = settings
+
+        def is_alive(self):
+            return False
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(Dead(), "secreto-webhook-1234567", None))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        r = requests.post(f"http://127.0.0.1:{httpd.server_address[1]}/telegram", data="{}",
+                          headers={"X-Telegram-Bot-Api-Secret-Token": "secreto-webhook-1234567"})
+        assert r.status_code == 503  # Telegram reintenta en lugar de darlo por entregado
+    finally:
+        httpd.shutdown()

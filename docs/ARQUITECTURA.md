@@ -64,8 +64,13 @@ formato pero no el criterio).
 3. **Inyección de instrucciones**: el contenido web y de documentos se entrega al modelo como datos
    marcados; se detectan patrones de inyección y se alerta. Aun si el modelo fuese engañado, las
    acciones peligrosas siguen requiriendo tu aprobación.
-4. **Código generado**: corre sin red (namespace vacío), sin variables secretas, con límites de CPU,
-   memoria y tamaño de archivos, dentro del espacio de trabajo del trabajo.
+4. **Código generado** (`run_python`): doble aislamiento verificado con intentos reales antes de usarse.
+   *Red*: namespace vacío (`unshare -rn`; en runners de GitHub `sudo unshare -n` + `setpriv` para volver
+   al usuario normal). *Archivos*: Landlock (`agente/sandbox_boot.py`) — lectura sólo del sistema y del
+   intérprete, escritura sólo en el espacio del trabajo, carpeta compartida de sólo lectura, sin acceso
+   a la base del agente ni a `/proc` (evita leer el entorno, con secretos, del proceso padre), sin TCP y
+   sin señales a otros procesos. Además: sin variables secretas y con límites de CPU, memoria y tamaño.
+   Si el host no ofrece Landlock (p. ej. Android/Termux), **toda** ejecución de código pide aprobación.
 5. **SSRF**: se bloquean destinos internos (localhost, redes privadas, metadatos de nube), también tras
    redirecciones.
 6. **Secretos**: sólo en GitHub Secrets; se redactan de salidas, mensajes y errores; los logs de Actions
@@ -93,3 +98,16 @@ había sido **retirado el 2026-07-30**. Se descubrió al ejecutar el CI real: el
 `HTTP 200 text/plain "OK"` a todo pedido. Corrección: GitHub Models salió de la cadena por defecto
 (sólo se activa con `AGENTE_LLM_PROVIDERS=github` + `GITHUB_MODELS_TOKEN`), el cliente informa
 respuestas no JSON y la evaluación en vivo exige una clave de Groq, Gemini u OpenRouter.
+
+## Revisión de Codex en el PR #1 (corregida)
+- **P1 sistema de archivos**: el código generado podía borrar/modificar archivos fuera de su espacio
+  (incluida la base) sin aprobación → sandbox Landlock descrito arriba + aprobación obligatoria si no
+  está disponible. Se detectó además la lectura de `/proc/<pid>/environ` del proceso padre (secretos).
+- **P1 cuota**: en modo servidor el trabajador reintentaba en bucle con la cuota agotada y gastaba el
+  presupuesto del trabajo → pausa persistente (5 min → 1 h exponencial ante 429; hasta la medianoche UTC
+  con el tope propio), los intentos fallidos por cuota no cuentan y el trabajador espera.
+- **P2 webhook**: el mensaje confirmado a Telegram vivía sólo en memoria → buzón SQLite escrito antes
+  de responder 200 (503 si el trabajador no está vivo, para que Telegram reintente), procesado con
+  deduplicación y sincronizado al estado cifrado apenas se recibe. Riesgo residual: en un host con
+  disco efímero (Render) un reemplazo del contenedor en los segundos entre la recepción y la subida
+  del estado puede perder ese mensaje.
