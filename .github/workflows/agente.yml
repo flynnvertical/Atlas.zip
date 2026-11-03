@@ -1,0 +1,108 @@
+name: Agente (Telegram, ejecución programada)
+
+# Los cron de GitHub sólo corren desde la rama por defecto. Intervalo mínimo 5 min; GitHub puede
+# demorarlos (sin garantía de horario) y los desactiva tras 60 días sin actividad en el repo.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [telegram]
+
+permissions:
+  contents: write   # guardar el estado cifrado en la rama agent-state
+  models: read      # GitHub Models (gratis, con cuota)
+  actions: write    # mantener el workflow habilitado
+
+concurrency:
+  group: agente-estado      # nunca dos ejecuciones simultáneas sobre el mismo estado
+  cancel-in-progress: false
+
+jobs:
+  ejecutar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
+      AGENTE_STATE_KEY: ${{ secrets.AGENTE_STATE_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      AGENTE_TZ: ${{ vars.AGENTE_TZ || 'America/Argentina/Buenos_Aires' }}
+      AGENTE_LLM_DAILY_CAP: ${{ vars.AGENTE_LLM_DAILY_CAP || '120' }}
+      AGENTE_RUN_SECONDS: "480"
+      AGENTE_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - name: Verificar secretos obligatorios
+        id: cfg
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$AGENTE_STATE_KEY" ]; then
+            echo "::notice::Faltan TELEGRAM_BOT_TOKEN o AGENTE_STATE_KEY. Ver docs/INSTALACION.md"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ok == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.cfg.outputs.ok == 'true'
+        with: {python-version: "3.12", cache: pip}
+
+      - name: Instalar dependencias
+        if: steps.cfg.outputs.ok == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Restaurar estado cifrado
+        if: steps.cfg.outputs.ok == 'true'
+        run: |
+          mkdir -p data
+          if git ls-remote --exit-code --heads origin agent-state >/dev/null 2>&1; then
+            git fetch --depth=1 origin agent-state
+            git show origin/agent-state:estado.enc > /tmp/estado.enc
+            python -m agente state unpack /tmp/estado.enc data
+            python -m agente state digest data > /tmp/antes.sha
+          else
+            echo "Primera ejecución: estado nuevo"; echo none > /tmp/antes.sha
+          fi
+
+      - name: Ejecutar una pasada del agente
+        if: steps.cfg.outputs.ok == 'true'
+        # Sólo se imprimen métricas (los logs de un repo público son públicos).
+        run: python -m agente run-once
+
+      - name: Guardar estado cifrado (sólo si cambió)
+        if: always() && steps.cfg.outputs.ok == 'true'
+        run: |
+          [ -f data/agente.db ] || exit 0
+          if [ "$(python -m agente state digest data)" = "$(cat /tmp/antes.sha)" ]; then
+            echo "Estado sin cambios"; exit 0
+          fi
+          python -m agente state pack data /tmp/estado/estado.enc
+          cd /tmp/estado
+          git init -q -b agent-state
+          git config user.name "agente-supremo"
+          git config user.email "agente@users.noreply.github.com"
+          git add estado.enc
+          git commit -qm "estado $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" agent-state
+          echo "Estado guardado"
+
+      - name: Copia de seguridad cifrada (5 días)
+        if: always() && steps.cfg.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: estado-cifrado-${{ github.run_number }}
+          path: /tmp/estado/estado.enc
+          retention-days: 5
+          if-no-files-found: ignore
+
+      - name: Mantener habilitado el cron (evita la desactivación por inactividad)
+        if: always()
+        continue-on-error: true
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/agente.yml/enable" >/dev/null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

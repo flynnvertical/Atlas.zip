@@ -1,0 +1,109 @@
+name: CI + evaluación en vivo
+
+on:
+  push:
+    branches-ignore: [agent-state]
+    paths: ["agente/**", "tests/**", "scripts/**", "requirements*.txt", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "IDs de casos en vivo a correr (ej. L03,L07). Vacío = todos"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  models: read   # GitHub Models gratis con GITHUB_TOKEN (cuota limitada)
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Pruebas deterministas
+        run: python -m pytest tests -q -rs --junitxml=reports/pytest.xml
+      - name: Diagnóstico de aislamiento
+        run: python -m agente doctor
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: pytest, path: reports/pytest.xml, retention-days: 14}
+
+  en-vivo:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Claves opcionales de respaldo (si las configurás como secretos)
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AGENTE_LLM_DAILY_CAP: "140"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Evaluación en vivo (modelo real + internet real)
+        run: python scripts/live_eval.py --out reports/live_eval.json --only "${{ github.event.inputs.only }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: live-eval, path: reports/live_eval.json, retention-days: 30}
+
+  # Persistencia real entre DOS runners distintos usando el mismo mecanismo que el despliegue
+  # (estado cifrado en una rama git). Datos de prueba no sensibles; la rama se borra al final.
+  persistencia-1:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write, models: read}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
+      AGENTE_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Sesión 1 — enseñar un dato
+        run: |
+          python -m agente ask "Guardá en tu memoria: mi empresa se llama Electro Sur SRL y vende cables en Mendoza."
+      - name: Guardar estado cifrado en rama temporal
+        run: |
+          python -m agente state pack data /tmp/estado/estado.enc
+          cd /tmp/estado && git init -q -b ci-state && git add estado.enc
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "estado ci"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "ci-state:ci-state-${{ github.run_id }}"
+
+  persistencia-2:
+    needs: persistencia-1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write, models: read}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
+      AGENTE_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Sesión 2 (otra máquina) — restaurar y recordar
+        run: |
+          git fetch --depth=1 origin "ci-state-${{ github.run_id }}"
+          git show FETCH_HEAD:estado.enc > /tmp/estado.enc
+          python -m agente state unpack /tmp/estado.enc data
+          python -m agente ask "¿Cómo se llama mi empresa y qué vende? Respondé en una línea." | tee /tmp/salida.txt
+          grep -qi "electro sur" /tmp/salida.txt && echo "PERSISTENCIA OK: recordó el dato en otra máquina"
+      - name: Borrar rama temporal
+        if: always()
+        run: git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" --delete "ci-state-${{ github.run_id }}" || true

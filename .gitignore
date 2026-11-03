@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+/data/
+/workspace/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+state/
+reports/tmp/
