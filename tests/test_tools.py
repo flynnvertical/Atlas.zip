@@ -177,7 +177,8 @@ def test_run_python_executes_and_reports_files(ctx):
     assert "r.csv" in ctx.created_files
 
 
-@pytest.mark.skipif(not code_t.network_isolation_available(), reason="unshare no disponible")
+@pytest.mark.skipif(not code_t.network_isolation_available() and not os.environ.get("AGENTE_REQUIRE_ISOLATION"),
+                    reason="aislamiento de red no disponible en este host")
 def test_run_python_has_no_network(ctx):
     out = code_t.run_python(ctx, "import socket\ns=socket.socket();s.settimeout(3)\n"
                                  "print('RES', s.connect_ex(('1.1.1.1',443)))")

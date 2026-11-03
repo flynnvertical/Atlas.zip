@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import math
 import operator
+import os
 import resource
 import shutil
 import subprocess
@@ -14,23 +15,42 @@ from pathlib import Path
 from ..security import redact, safe_env_for_subprocess
 from . import CODE, READ, Tool, ToolContext, ToolError
 
-_ISOLATION: bool | None = None
+_PREFIX: list[str] | None = None
+_PROBE = ("import socket\ns=socket.socket();s.settimeout(3)\n"
+          "try:\n    s.connect(('1.1.1.1',53));print('RED')\nexcept OSError:\n    print('SINRED')")
+
+
+def _candidate_prefixes() -> list[list[str]]:
+    """Formas de ejecutar sin red, de menor a mayor privilegio requerido."""
+    cands = []
+    if shutil.which("unshare"):
+        cands.append(["unshare", "-rn"])  # namespace de usuario sin privilegios (Linux común)
+        # Runners de GitHub: los namespaces sin privilegios están restringidos, pero hay sudo sin
+        # contraseña. Se crea el namespace de red como root y se vuelve de inmediato al usuario normal.
+        if os.geteuid() != 0 and shutil.which("sudo") and shutil.which("setpriv"):
+            cands.append(["sudo", "-n", "unshare", "-n", "--", "setpriv", f"--reuid={os.getuid()}",
+                          f"--regid={os.getgid()}", "--clear-groups", "--"])
+    return cands
+
+
+def isolation_prefix() -> list[str]:
+    """Prefijo de comando que garantiza ejecución sin red, verificado con una conexión real."""
+    global _PREFIX
+    if _PREFIX is None:
+        _PREFIX = []
+        for pre in _candidate_prefixes():
+            try:
+                r = subprocess.run(pre + [sys.executable, "-I", "-c", _PROBE], capture_output=True, timeout=15)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 0 and r.stdout.strip() == b"SINRED":
+                _PREFIX = pre
+                break
+    return _PREFIX
 
 
 def network_isolation_available() -> bool:
-    """Comprueba si se puede ejecutar en un namespace de red vacío (sin internet)."""
-    global _ISOLATION
-    if _ISOLATION is None:
-        if not shutil.which("unshare"):
-            _ISOLATION = False
-        else:
-            try:
-                r = subprocess.run(["unshare", "-rn", sys.executable, "-c", "print(1)"],
-                                   capture_output=True, timeout=10)
-                _ISOLATION = r.returncode == 0 and r.stdout.strip() == b"1"
-            except (OSError, subprocess.SubprocessError):
-                _ISOLATION = False
-    return _ISOLATION
+    return bool(isolation_prefix())
 
 
 def _limits(cpu: int, mem_mb: int):
@@ -48,7 +68,7 @@ def run_python(ctx: ToolContext, code: str, timeout: int = 60) -> str:
     script.write_text(code, encoding="utf-8")
     isolated = network_isolation_available() and not ctx.settings.sandbox_network
     ctx.sandbox_isolated = isolated
-    cmd =(["unshare", "-rn"] if isolated else []) + [sys.executable, "-I", str(script.name)]
+    cmd = (isolation_prefix() if isolated else []) + [sys.executable, "-I", str(script.name)]
     before = {p for p in ctx.workspace.rglob("*") if p.is_file()}
     t0 = time.time()
     try:

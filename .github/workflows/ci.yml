@@ -29,6 +29,8 @@ jobs:
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements-dev.txt
       - name: Pruebas deterministas
+        env:
+          AGENTE_REQUIRE_ISOLATION: "1"   # en CI el sandbox sin red es obligatorio, no opcional
         run: python -m pytest tests -q -rs --junitxml=reports/pytest.xml
       - name: Diagnóstico de aislamiento
         run: python -m agente doctor
