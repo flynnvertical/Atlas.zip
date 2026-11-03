@@ -308,7 +308,7 @@ class App:
         d.kv_set("last_maintenance", str(now))
         d.conn.execute("VACUUM")
 
-    def poll_forever(self, run_slice: int = 120) -> None:
+    def poll_forever(self, run_slice: int = 120, after_cycle=None) -> None:
         """Modo continuo (PC o Android/Termux): respuesta en segundos mientras esté encendido."""
         while True:
             try:
@@ -319,6 +319,9 @@ class App:
                 run_due_schedules(self.db, self.s.timezone)
                 self.process_jobs(time.time() + run_slice)
                 self.outbox.flush()
+                self.maintenance()
+                if after_cycle:
+                    after_cycle()  # p. ej. subir el estado cifrado a GitHub
             except KeyboardInterrupt:
                 return
             except Exception as e:  # noqa: BLE001

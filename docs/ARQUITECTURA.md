@@ -1,0 +1,85 @@
+# Arquitectura de AGENTE SUPREMO
+
+## Decisión principal: agente único propio + GitHub Actions + Telegram
+
+```
+ Android (Telegram)                    GitHub (repo público, USD 0)
+ ┌──────────────┐  mensajes   ┌───────────────────────────────────────────────┐
+ │  Tu chat con │ ──────────► │ Workflow "agente.yml" (cron cada 10 min o     │
+ │  el bot      │ ◄────────── │ ejecución manual)                             │
+ └──────────────┘ resultados, │  1. restaura estado cifrado (rama agent-state)│
+                  archivos,   │  2. lee mensajes nuevos (getUpdates)          │
+                  aprobaciones│  3. encola trabajos / ejecuta comandos        │
+                              │  4. orquestador: plan → herramientas →        │
+                              │     verificación → entrega                    │
+                              │  5. guarda estado cifrado si cambió           │
+                              └──────────┬────────────────────────────────────┘
+                                         │ API compatible OpenAI
+                         GitHub Models (GITHUB_TOKEN) → respaldo Groq/Gemini/OpenRouter/Ollama
+```
+
+### Módulos (`agente/`)
+| Módulo | Función |
+|---|---|
+| `agent.py` | Orquestador: plan con criterios de éxito, bucle de herramientas con presupuesto, aprobaciones, verificación, autocorrección, reintentos |
+| `verify.py` | Controles deterministas (URLs citadas realmente consultadas, archivos existentes, fuentes cuando hubo investigación) + auditor LLM independiente |
+| `tools/web.py` | `web_search` (SearXNG/Brave opcionales → DuckDuckGo → Wikipedia), `fetch_url` (HTML/PDF/JSON), `download_file`, `http_request` |
+| `tools/files.py` | Lectura PDF/DOCX/XLSX/CSV/JSON/TXT; generación DOCX (desde markdown), XLSX, CSV, JSON, MD, HTML |
+| `tools/code.py` | `run_python` aislado (namespace de red vacío, sin secretos, límites CPU/memoria/tamaño) y `calculate` exacto |
+| `tools/memtools.py` | Memoria, avisos de progreso, tareas programadas |
+| `memory.py` | Memoria persistente SQLite FTS5 (BM25, insensible a acentos), con origen, confianza, correcciones con histórico, expiración y borrado |
+| `scheduler.py` | Cola con *leases* (recuperación de trabajos interrumpidos), deduplicación, tareas recurrentes (`every:N`, `daily:HH:MM` con zona horaria) |
+| `llm.py` | Cliente multi-proveedor con respaldo ante 429/5xx, contabilidad de tokens y tope diario propio |
+| `security.py` | Anti-SSRF (también en redirecciones), detección y cuarentena de inyecciones, redacción de secretos, entorno sin secretos para subprocesos |
+| `telegram.py` / `app.py` | Bot API, lista blanca de usuarios, comandos, cola de salida persistente con reintentos, modo `run-once` (cron) y `poll` (continuo) |
+| `state_store.py` | Estado (base + espacio de trabajo) empaquetado y cifrado AES-256-GCM, clave derivada con scrypt |
+
+## Por qué esta combinación (y no otras)
+
+Investigación realizada el 2026-11-03 (fuentes al final). Criterio: capacidad real por costo, con
+la restricción dura de USD 0/mes y administración desde Android.
+
+| Opción | Evaluación | Decisión |
+|---|---|---|
+| **OpenClaw** | Agente personal completo con Telegram, pero requiere un host siempre encendido (VPS = pago) y reportes de configuración/mantenimiento difíciles; modo por defecto con acceso amplio al host. | Descartado como base: no cumple USD 0 sin servidor y su superficie de seguridad es grande. |
+| **Hermes Agent** | Interesante por auto-generación de habilidades; fuentes contradictorias sobre su integración con Telegram; también necesita host permanente. | Descartado por ahora. Reevaluable si conseguís un host gratuito permanente. |
+| **LangGraph / LangChain** | Muy bueno para grafos durables complejos, pero agrega dependencias y abstracciones que no aportan para un agente único con ~16 herramientas. | No usado. La persistencia/reanudación que aporta LangGraph se implementó con checkpoints en SQLite (≈150 líneas, probadas). |
+| **OpenAI Agents SDK** | Primitivas limpias (agentes, herramientas, guardrails), pero orientado a la API de OpenAI (paga). | No usado. Se adoptó el mismo formato de *function calling*, compatible con todos los proveedores gratuitos. |
+| **Deep Agents** | Patrón planificador + subagentes + sistema de archivos. | Patrón adoptado parcialmente (plan + espacio de trabajo); sin subagentes porque multiplican llamadas y la cuota gratuita es el recurso escaso. |
+| **n8n** | Excelente para integraciones, pero autoalojarlo exige servidor; la nube es paga. | No usado. Integrable a futuro vía `http_request` (con aprobación). |
+| **MCP** | Estándar para conectar herramientas. | No es necesario para el MVP (las herramientas son internas). Ver “Próximos pasos”. |
+| **Infraestructura** | GitHub Actions: minutos ilimitados en repos públicos, cron mínimo 5 min con demoras, desactivación tras 60 días sin actividad. Telegram Bot API: gratis. GitHub Models: gratis con límites por modelo. | **Elegido**: es la única combinación que permite ejecución desatendida, persistencia y un LLM sin tarjeta de crédito. |
+
+**Un solo agente**: con cuotas de ~50–150 pedidos/día, cada subagente adicional reduce la cantidad de
+tareas útiles. El único "especialista" separado es el **auditor**, que sólo corre cuando los controles
+deterministas ya pasaron, y su utilidad se comprueba en las pruebas (detecta respuestas que cumplen el
+formato pero no el criterio).
+
+## Modelo de seguridad
+1. **Lista blanca**: sólo los IDs de Telegram en `TELEGRAM_ALLOWED_USERS` pueden dar órdenes.
+2. **Aprobación humana obligatoria** (no la decide el modelo, la impone el código) para: borrar archivos
+   o memorias, cualquier `POST/PUT/PATCH/DELETE` a servicios externos y ejecución de código sin
+   aislamiento de red después de leer contenido externo. Cada aprobación muestra la acción y sus
+   argumentos exactos, se ejecuta una sola vez y sólo la puede decidir el chat dueño del trabajo.
+3. **Inyección de instrucciones**: el contenido web y de documentos se entrega al modelo como datos
+   marcados; se detectan patrones de inyección y se alerta. Aun si el modelo fuese engañado, las
+   acciones peligrosas siguen requiriendo tu aprobación.
+4. **Código generado**: corre sin red (namespace vacío), sin variables secretas, con límites de CPU,
+   memoria y tamaño de archivos, dentro del espacio de trabajo del trabajo.
+5. **SSRF**: se bloquean destinos internos (localhost, redes privadas, metadatos de nube), también tras
+   redirecciones.
+6. **Secretos**: sólo en GitHub Secrets; se redactan de salidas, mensajes y errores; los logs de Actions
+   (públicos en repos públicos) sólo muestran métricas.
+7. **Estado**: cifrado AES-256-GCM autenticado; sin `AGENTE_STATE_KEY` es ilegible aunque el repo sea público.
+
+## Fuentes consultadas en la investigación
+- GitHub Models, facturación y acceso gratuito con límites: https://docs.github.com/en/billing/concepts/product-billing/github-models
+- Límites de GitHub Models (terceros, no oficiales): https://fast.io/resources/github-models-rate-limit/
+- Permiso `models: read` en Actions (terceros): https://github.com/nsrosenqvist/nitpik/wiki/04-GitHub-Models
+- Cuotas Groq (terceros): https://benchlm.ai/free-tier/groq · https://eesel.ai/blog/groq-pricing
+- Cuotas Gemini (fuentes contradictorias): https://agentdeals.dev/gemini-api-pricing-changes · https://tinkerllm.com/blog/gemini-api-free-tier-limits-rate-quotas/
+- Cron de Actions, 60 días y demoras: https://github.com/gautamkrishnar/keepalive-workflow · https://cronuru.com/guides/github-actions-scheduled-workflows
+- OpenClaw vs Hermes: https://www.mindstudio.ai/blog/hermes-agent-vs-openclaw-self-hosted-ai-agent-comparison · https://use-apify.com/blog/openclaw-vs-hermes-agent-2026 · https://parallel.ai/articles/openclaw-vs-nousresearch-hermes.md
+
+Las cifras de cuotas de terceros no coinciden entre sí: el sistema no depende de ninguna cifra
+concreta. Controla su propio tope diario (`AGENTE_LLM_DAILY_CAP`) y, ante un 429, pausa y reanuda.

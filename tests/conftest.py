@@ -119,7 +119,7 @@ class LocalServer:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = _handle
+            do_GET = do_POST = do_PUT = _handle
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"

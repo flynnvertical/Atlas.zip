@@ -1,0 +1,39 @@
+# Blueprint de Render (plan gratuito). Render → New → Blueprint → elegir este repo.
+# Plan free: se suspende tras 15 min sin tráfico (el webhook de Telegram lo despierta en ~1 min),
+# 750 h/mes compartidas, disco efímero (por eso el estado se sincroniza cifrado con GitHub).
+services:
+  - type: web
+    name: agente-supremo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m agente serve
+    healthCheckPath: /
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_USERS
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: AGENTE_STATE_KEY
+        sync: false
+      - key: AGENTE_STATE_REPO
+        sync: false
+      - key: AGENTE_STATE_GH_TOKEN
+        sync: false
+      - key: GITHUB_MODELS_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AGENTE_TICK_KEY
+        generateValue: true
+      - key: AGENTE_TZ
+        value: America/Argentina/Buenos_Aires
+      - key: AGENTE_DATA_DIR
+        value: /tmp/agente

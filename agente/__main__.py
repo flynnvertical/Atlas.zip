@@ -29,13 +29,40 @@ def cmd_run_once(a) -> int:
 
 def cmd_poll(a) -> int:
     from .app import App
+    from .state_sync import GitHubStateSync
     s = Settings.from_env()
     m = _messenger(s)
     if not m:
         print("Falta TELEGRAM_BOT_TOKEN", file=sys.stderr)
         return 2
+    sync = GitHubStateSync.from_env(s.data_dir)
+    if sync:
+        sync.pull()
+        print("Estado restaurado desde GitHub.")
+    try:
+        m.call("deleteWebhook")  # el modo continuo usa getUpdates
+    except Exception:  # noqa: BLE001
+        pass
     print("Agente en modo continuo. Ctrl+C para salir.")
-    App(s, messenger=m).poll_forever()
+    App(s, messenger=m).poll_forever(after_cycle=sync.push if sync else None)
+    return 0
+
+
+def cmd_serve(a) -> int:
+    from .server import serve
+    from .state_sync import GitHubStateSync
+    s = Settings.from_env()
+    m = _messenger(s)
+    if not m:
+        print("Falta TELEGRAM_BOT_TOKEN", file=sys.stderr)
+        return 2
+    sync = GitHubStateSync.from_env(s.data_dir)
+    if not sync:
+        print("AVISO: sin AGENTE_STATE_REPO/AGENTE_STATE_GH_TOKEN/AGENTE_STATE_KEY el estado se pierde al reiniciar.")
+    url = os.environ.get("AGENTE_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    httpd = serve(s, m, sync, public_url=url)
+    print(f"Servidor escuchando en el puerto {httpd.server_address[1]}", flush=True)
+    httpd.serve_forever()
     return 0
 
 
@@ -110,6 +137,7 @@ def main(argv=None) -> int:
     r.add_argument("--seconds", type=int, default=None)
     r.set_defaults(f=cmd_run_once)
     sub.add_parser("poll", help="modo continuo con Telegram").set_defaults(f=cmd_poll)
+    sub.add_parser("serve", help="servidor webhook (Render/Koyeb/PC)").set_defaults(f=cmd_serve)
     q = sub.add_parser("ask", help="ejecutar un objetivo desde consola")
     q.add_argument("objective")
     q.set_defaults(f=cmd_ask)
