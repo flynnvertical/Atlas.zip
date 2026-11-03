@@ -17,6 +17,8 @@ services:
         sync: false
       - key: TELEGRAM_ALLOWED_USERS
         sync: false
+      - key: AGENTE_PAIRING_CODE
+        sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         generateValue: true
       - key: AGENTE_STATE_KEY

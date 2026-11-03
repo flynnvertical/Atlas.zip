@@ -24,6 +24,7 @@ jobs:
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
+      AGENTE_PAIRING_CODE: ${{ secrets.AGENTE_PAIRING_CODE }}
       AGENTE_STATE_KEY: ${{ secrets.AGENTE_STATE_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}

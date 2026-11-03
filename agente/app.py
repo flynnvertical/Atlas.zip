@@ -1,7 +1,9 @@
 """Ciclo de ejecución: recibe mensajes, gestiona comandos, procesa la cola y entrega resultados."""
 from __future__ import annotations
 
+import hmac
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -13,6 +15,8 @@ from .llm import LLM, QuotaExhausted
 from .memory import Memory
 from .scheduler import add_schedule, claim_next, enqueue, run_due_schedules
 from .security import redact
+
+MAX_PAIR_FAILS = 5
 
 HELP = """🤖 AGENTE SUPREMO — comandos
 Escribí cualquier objetivo en lenguaje natural y lo ejecuto (investigar, calcular, generar
@@ -78,8 +82,38 @@ class App:
         self.outbox.flush()  # avisos (aprobaciones, progreso) salen de inmediato
 
     # ------------------------------------------------------------------ entrada
+    def owners(self) -> set[int]:
+        try:
+            return {int(x) for x in json.loads(self.db.kv_get("owner_ids", "[]") or "[]")}
+        except ValueError:
+            return set()
+
     def authorized(self, user_id: int) -> bool:
-        return user_id in self.s.telegram_allowed
+        return user_id in self.s.telegram_allowed or user_id in self.owners()
+
+    def _pair(self, chat_id: int, user_id: int, chat_type: str, text: str) -> str | None:
+        """Vinculación del dueño con código (AGENTE_PAIRING_CODE). Devuelve la respuesta o None."""
+        code = os.environ.get("AGENTE_PAIRING_CODE", "")
+        if self.authorized(user_id):
+            return "Ya estás autorizado."
+        if len(code) < 8:
+            return None  # vinculación deshabilitada: no revelar nada
+        if self.owners() or self.s.telegram_allowed:
+            return None  # ya hay dueño: la vinculación queda cerrada para siempre
+        if chat_type != "private":
+            return "La vinculación sólo funciona en un chat privado con el bot."
+        fails = int(self.db.kv_get("pair_fail", "0") or 0)
+        if fails >= MAX_PAIR_FAILS:
+            return None  # bloqueada tras intentos fallidos
+        given = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+        if not hmac.compare_digest(given.encode(), code.encode()):
+            self.db.kv_set("pair_fail", str(fails + 1))
+            self.db.log("warn", "pair_failed", {"intentos": fails + 1})
+            return "Código incorrecto." if fails + 1 < MAX_PAIR_FAILS else None
+        self.db.kv_set("owner_ids", json.dumps([user_id]))
+        self.db.log("info", "paired", {"user": "redactado"})
+        return (f"✅ Vinculado: tu ID {user_id} quedó registrado como dueño (guardado en el estado cifrado). "
+                "La vinculación quedó cerrada. Ya podés borrar el secreto AGENTE_PAIRING_CODE.\n\n" + HELP)
 
     def handle_update(self, upd: dict) -> None:
         uid = upd.get("update_id")
@@ -96,6 +130,11 @@ class App:
         if chat_id is None or user_id is None:
             return
         text = (msg.get("text") or msg.get("caption") or "").strip()
+        if text.split("@")[0].split(" ")[0].lower() == "/vincular":
+            reply = self._pair(chat_id, user_id, (msg.get("chat") or {}).get("type", ""), text)
+            if reply:
+                self.outbox.put(chat_id, reply)
+            return
         if text.startswith("/id"):
             self.outbox.put(chat_id, f"Tu ID de Telegram es {user_id}. Agregalo al secreto "
                                      "TELEGRAM_ALLOWED_USERS para autorizarte.")

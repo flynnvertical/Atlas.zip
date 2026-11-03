@@ -234,3 +234,58 @@ def test_retired_github_models_not_used_by_default(monkeypatch):
     assert providers_from_env() == []  # GitHub Models fue retirado el 2026-07-30
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
     assert [p.name for p in providers_from_env()] == ["groq"]
+
+
+# --- vinculación del dueño con código --------------------------------------------
+def _pm(text, user_id=555, update_id=1, chat_type="private"):
+    m = msg(chat_id=user_id, user_id=user_id, text=text, update_id=update_id)
+    m["message"]["chat"]["type"] = chat_type
+    return m
+
+
+def test_pairing_registers_owner_once(settings, db, messenger, monkeypatch):
+    settings.telegram_allowed = set()
+    monkeypatch.setenv("AGENTE_PAIRING_CODE", "codigo-secreto-123")
+    app = make_app(settings, db, [], messenger)
+    app.handle_update(_pm("hacé algo", update_id=1))
+    assert db.one("SELECT COUNT(*) c FROM jobs")["c"] == 0  # antes de vincular: ignorado
+    app.handle_update(_pm("/vincular codigo-secreto-123", update_id=2))
+    app.outbox.flush()
+    assert "Vinculado" in messenger.texts() and app.authorized(555)
+    # el dueño queda en el estado (sobrevive reinicios) y nadie más puede vincularse
+    app2 = make_app(settings, db, [], FakeMessenger())
+    assert app2.authorized(555)
+    app2.handle_update(_pm("/vincular codigo-secreto-123", user_id=777, update_id=3))
+    app2.outbox.flush()
+    assert not app2.authorized(777) and app2.messenger.sent == []
+    app2.handle_update(_pm("investigá X", update_id=4))
+    assert db.one("SELECT COUNT(*) c FROM jobs")["c"] == 1
+
+
+def test_pairing_lockout_after_wrong_codes(settings, db, messenger, monkeypatch):
+    settings.telegram_allowed = set()
+    monkeypatch.setenv("AGENTE_PAIRING_CODE", "codigo-secreto-123")
+    app = make_app(settings, db, [], messenger)
+    for i in range(5):
+        app.handle_update(_pm(f"/vincular intento{i}", user_id=900, update_id=10 + i))
+    app.handle_update(_pm("/vincular codigo-secreto-123", user_id=900, update_id=20))
+    assert not app.authorized(900)  # bloqueada aunque después acierte
+
+
+def test_pairing_disabled_without_code_or_in_groups(settings, db, messenger, monkeypatch):
+    settings.telegram_allowed = set()
+    monkeypatch.delenv("AGENTE_PAIRING_CODE", raising=False)
+    app = make_app(settings, db, [], messenger)
+    app.handle_update(_pm("/vincular cualquiera", update_id=1))
+    monkeypatch.setenv("AGENTE_PAIRING_CODE", "codigo-secreto-123")
+    app.handle_update(_pm("/vincular codigo-secreto-123", update_id=2, chat_type="group"))
+    app.outbox.flush()
+    assert not app.authorized(555)
+    assert "chat privado" in messenger.texts()
+
+
+def test_pairing_closed_when_allowlist_configured(settings, db, messenger, monkeypatch):
+    monkeypatch.setenv("AGENTE_PAIRING_CODE", "codigo-secreto-123")
+    app = make_app(settings, db, [], messenger)  # settings.telegram_allowed = {111}
+    app.handle_update(_pm("/vincular codigo-secreto-123", user_id=555, update_id=1))
+    assert not app.authorized(555)

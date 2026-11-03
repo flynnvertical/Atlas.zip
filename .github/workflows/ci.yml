@@ -59,6 +59,26 @@ jobs:
             echo "Falta una clave de proveedor de modelo gratuito en Settings → Secrets → Actions (GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # Verifica el token del bot con getMe (no lee ni consume mensajes; imprime sólo el @usuario).
+  telegram:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Token de Telegram válido
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::warning::Secreto TELEGRAM_BOT_TOKEN no configurado"; exit 0
+          fi
+          python -m agente doctor --online | tee /tmp/doctor.json
+          grep -q '"telegram_bot": "@' /tmp/doctor.json
+
   en-vivo:
     needs: [pruebas, proveedor]
     if: needs.proveedor.outputs.ok == 'true'

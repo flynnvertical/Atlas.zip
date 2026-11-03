@@ -115,6 +115,7 @@ def cmd_doctor(a) -> int:
         "proveedores_llm": [f"{p.name}:{p.model}" for p in providers_from_env()],
         "telegram_configurado": bool(s.telegram_token),
         "usuarios_autorizados": len(s.telegram_allowed),
+        "vinculacion_con_codigo": len(os.environ.get("AGENTE_PAIRING_CODE", "")) >= 8,
         "aislamiento_red_sandbox": network_isolation_available(),
         "clave_estado": bool(os.environ.get("AGENTE_STATE_KEY")),
         "zona_horaria": s.timezone,

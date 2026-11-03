@@ -3,11 +3,20 @@
 Todo se puede hacer desde el celular (navegador + app de Telegram). Ningún paso requiere tarjeta
 de crédito. **Nunca pegues claves en el chat con el agente ni en el código**: van en *Secrets*.
 
-## Paso 0 — Crear el bot de Telegram (5 min, obligatorio)
-1. En Telegram abrí **@BotFather** → `/newbot` → elegí nombre y usuario (terminado en `bot`).
-2. Copiá el token que te da (formato `123456789:AA...`). Es una credencial: guardala sólo como secreto.
-3. Tu ID numérico: lo obtenés después escribiéndole `/id` a tu propio bot (el bot responde `/id`
-   incluso antes de autorizarte, y no hace nada más con desconocidos).
+## Paso 0 — Bot de Telegram ✅ (creado: @AgenteSupremoflynn_bot)
+El token es una credencial: va **sólo** en GitHub Secrets, nunca en el chat, el código o commits.
+Si alguna vez lo pegaste en un chat, revocalo cuando el bot funcione (@BotFather → `/revoke`) y
+cargá el nuevo directamente como secreto.
+
+### Autorizar tu cuenta (elegí una)
+- **A. Vinculación con código (no necesitás saber tu ID):** creá el secreto `AGENTE_PAIRING_CODE`
+  con una frase de al menos 8 caracteres. Cuando el agente esté corriendo, escribile al bot en chat
+  privado `/vincular <tu frase>`. El primer código correcto te registra como dueño (queda guardado en
+  el estado cifrado) y la vinculación se cierra para siempre. 5 intentos fallidos la bloquean.
+  Después podés borrar ese secreto.
+- **B. Lista fija:** escribile `/id` al bot, te responde tu número; guardalo como secreto
+  `TELEGRAM_ALLOWED_USERS` (varios IDs separados por coma). Si este secreto existe, la vinculación
+  por código queda deshabilitada.
 
 ## Paso 1 — Proveedor de modelo (al menos uno, gratis)
 | Proveedor | Cómo obtenerlo | Variable |
