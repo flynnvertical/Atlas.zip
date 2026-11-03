@@ -320,7 +320,8 @@ class App:
             self.outbox.flush()
         return stats
 
-    def process_until_done(self, job_id: int, deadline: float, sleep=time.sleep) -> str:
+    def process_until_done(self, job_id: int, deadline: float, sleep=time.sleep,
+                           max_pause: float | None = None) -> str:
         """Procesa la cola hasta que el trabajo termine, respetando pausas por cuota (uso interactivo:
         `agente ask` y evaluación en vivo). Devuelve el estado final o el actual al vencer el plazo."""
         while True:
@@ -333,6 +334,8 @@ class App:
             if now >= deadline:
                 return status
             wait = (st.get("paused_until") or now + 2) - now
+            if max_pause is not None and wait > max_pause:
+                return status  # pausa larga (p. ej. cuota diaria): no tiene sentido esperar aquí
             sleep(max(1.0, min(wait, deadline - now)))
 
     def run_once(self, max_seconds: int | None = None) -> dict:

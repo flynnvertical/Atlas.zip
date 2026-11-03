@@ -272,3 +272,14 @@ def test_process_until_done_waits_through_quota_pause(settings, db):
         db.kv_set("quota_until", "0")  # simula que la pausa venció
     assert app.process_until_done(jid, time.time() + 120, sleep=fake_sleep) == "done"
     assert slept and 15 <= slept[0] <= 21
+
+
+def test_process_until_done_gives_up_on_long_pause(settings, db):
+    from agente.app import App
+    from agente.llm import QuotaExhausted
+    from agente.scheduler import enqueue
+    app = App(settings, db=db, llm=ScriptedLLM([QuotaExhausted("TPD", retry_after=3600)]))
+    jid = enqueue(db, 111, "hola")
+    slept = []
+    assert app.process_until_done(jid, time.time() + 600, sleep=slept.append, max_pause=180) == "queued"
+    assert slept == []  # no se queda esperando una hora

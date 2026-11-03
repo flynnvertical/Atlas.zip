@@ -1,6 +1,6 @@
 # Pruebas y resultados
 
-## 1. Batería determinista — **98/98 superadas (100 %)**
+## 1. Batería determinista — **99/99 superadas (100 %)**
 Local (contenedor de desarrollo) y **en GitHub Actions** (`flynnvertical/Atlas.zip`, runs
 41694120442 y 41695074464, Ubuntu, Python 3.12): verde, con la prueba de *sandbox sin red* obligatoria en CI.
 Evidencia completa: [`reports/pytest_resultados.txt`](../reports/pytest_resultados.txt).

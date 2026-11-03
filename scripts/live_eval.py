@@ -28,6 +28,7 @@ from agente.llm import LLM, QuotaExhausted  # noqa: E402
 from agente.scheduler import enqueue  # noqa: E402
 from agente.state_store import decrypt_file, encrypt_file  # noqa: E402
 
+MAX_PAUSE = 180  # segundos
 REPO = os.environ.get("GITHUB_REPOSITORY", "cargazul33/Atlas.zip")
 REF = os.environ.get("GITHUB_SHA") or os.environ.get("GITHUB_REF_NAME", "main")
 MALICIOUS_URL = f"https://raw.githubusercontent.com/{REPO}/{REF}/tests/fixtures/pagina_maliciosa.html"
@@ -76,7 +77,8 @@ class Runner:
     def run(self, objective: str, seconds: int = 300) -> dict:
         jid = enqueue(self.db, 1, objective, origin="eval")
         t0 = time.time()
-        self.app.process_until_done(jid, time.time() + seconds)  # espera pausas por cuota
+        # espera pausas cortas (límites por minuto); una pausa larga = cuota diaria agotada
+        self.app.process_until_done(jid, time.time() + seconds, max_pause=MAX_PAUSE)
         j = dict(self.db.one("SELECT * FROM jobs WHERE id=?", (jid,)))
         c = json.loads(j["counters"] or "{}")
         return {"id": jid, "status": j["status"], "text": j["result"] or "", "error": j["error"] or "", "seconds": round(time.time() - t0, 1),
@@ -206,9 +208,16 @@ def main() -> int:
         print("NO EJECUTADA: no hay proveedor de modelo configurado")
         return 2
     results = []
+    aborted = None
     for c in build_cases(r):
         if a.only and c["id"] not in a.only.split(","):
             continue
+        pause = r.app.quota_paused_until() - time.time()
+        if pause > MAX_PAUSE:
+            aborted = (f"ABORTADA en {c['id']}: cuota del proveedor agotada (pausa de {pause / 60:.0f} min). "
+                       "El resultado no mide al agente; re-ejecutar cuando se renueve la cuota.")
+            print(aborted, flush=True)
+            break
         rec = {"id": c["id"], "category": c["category"], "objective": c["objective"]}
         try:
             if c["setup"]:
@@ -277,9 +286,13 @@ def main() -> int:
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=str))
-    print(f"\nRESULTADO EN VIVO: {passed}/{len(results)} ({summary['rate']}%)")
+    if aborted:
+        summary["aborted"] = aborted
+    print(f"\nRESULTADO EN VIVO: {passed}/{len(results)} ({summary['rate']}%)" + (f" — {aborted}" if aborted else ""))
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+            if aborted:
+                fh.write(f"> ⚠️ {aborted}\n\n")
             fh.write(f"## Evaluación en vivo: {passed}/{len(results)} ({summary['rate']}%)\n\n| id | categoría | ok | llm | herramientas |\n|---|---|---|---|---|\n")
             for x in results:
                 fh.write(f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} | {x.get('llm_calls', '')} | {', '.join(x.get('tools') or [])} |\n")
