@@ -32,9 +32,25 @@ def extract_urls(text: str) -> list[str]:
     return [u.rstrip(".") for u in URL_RX.findall(text or "")]
 
 
+# Afirmaciones de acciones que deben estar respaldadas por una herramienta ejecutada con éxito.
+CLAIMS = [
+    (re.compile(r"(guard[ée]|guardado|registr[ée]|almacen[ée]|anot[ée]).{0,40}memoria|"
+                r"memoria.{0,30}(guardad|registrad|actualizad)|lo recordar[ée]|qued[óo] (guardado|registrado)",
+                re.I | re.S),
+     {"memory_save", "memory_correct"}, "guardar en memoria"),
+]
+
+
 def deterministic_checks(answer: str, seen_urls: set[str], created_files: list[str], workspace: Path,
-                         used_web: bool) -> Verification:
+                         used_web: bool, tools_ok: set[str] | None = None) -> Verification:
     v = Verification(passed=True)
+    if tools_ok is not None:
+        v.checks.append("acciones afirmadas respaldadas por herramientas")
+        for rx, needed, label in CLAIMS:
+            if rx.search(answer or "") and not (needed & tools_ok):
+                v.passed = False
+                v.issues.append(f"La respuesta afirma {label} pero no se ejecutó ninguna herramienta que lo haga "
+                                f"({' o '.join(sorted(needed))}). Hacelo de verdad o no lo afirmes.")
     v.checks.append("respuesta no vacía")
     if not answer or len(answer.strip()) < 2:
         v.passed = False

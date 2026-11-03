@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -30,7 +31,31 @@ class LLMError(Exception):
 
 
 class QuotaExhausted(LLMError):
-    """Se alcanzó el tope diario propio o todos los proveedores devolvieron 429."""
+    """Se alcanzó el tope diario propio o todos los proveedores devolvieron 429.
+
+    retry_after: segundos sugeridos por el proveedor (None si no lo indicó)."""
+
+    def __init__(self, msg: str, retry_after: float | None = None):
+        super().__init__(msg)
+        self.retry_after = retry_after
+
+
+_RA_RX = re.compile(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.I)
+
+
+def retry_after_seconds(r) -> float | None:
+    """Lee Retry-After (cabecera) o el texto 'try again in 1m2.5s' que usan Groq/OpenAI."""
+    h = r.headers.get("retry-after") if hasattr(r, "headers") else None
+    if h:
+        try:
+            return max(0.0, float(h))
+        except ValueError:
+            pass
+    m = _RA_RX.search(getattr(r, "text", "") or "")
+    if m and any(m.groups()):
+        hh, mm, ss = (float(x) if x else 0.0 for x in m.groups())
+        return hh * 3600 + mm * 60 + ss
+    return None
 
 
 @dataclass
@@ -47,6 +72,9 @@ def _env(name: str, default: str | None = None) -> str | None:
     return v if v else default
 
 
+GROQ_DEFAULT_MODELS = "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b"
+
+
 def providers_from_env() -> list[Provider]:
     order = [x.strip() for x in (_env("AGENTE_LLM_PROVIDERS", "groq,gemini,openrouter,ollama") or "").split(",") if x.strip()]
     out: list[Provider] = []
@@ -56,8 +84,11 @@ def providers_from_env() -> list[Provider]:
                                 _env("GITHUB_MODELS_MODEL", "openai/gpt-4.1-mini"),
                                 _env("GITHUB_MODELS_TOKEN")))
         elif name == "groq" and _env("GROQ_API_KEY"):
-            out.append(Provider("groq", "https://api.groq.com/openai/v1/chat/completions",
-                                _env("GROQ_MODEL", "openai/gpt-oss-120b"), _env("GROQ_API_KEY")))
+            # Varios modelos en cadena: en Groq cada modelo tiene su propia cuota gratuita.
+            models = [m.strip() for m in (_env("GROQ_MODEL", GROQ_DEFAULT_MODELS) or "").split(",") if m.strip()]
+            for m in models:
+                out.append(Provider("groq" if len(models) == 1 else f"groq/{m.split('/')[-1]}",
+                                    "https://api.groq.com/openai/v1/chat/completions", m, _env("GROQ_API_KEY")))
         elif name == "gemini" and _env("GEMINI_API_KEY"):
             out.append(Provider("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                                 _env("GEMINI_MODEL", "gemini-flash-latest"), _env("GEMINI_API_KEY")))
@@ -75,12 +106,13 @@ class LLM:
     """Interfaz: chat(messages, tools=None, json_mode=False) -> dict mensaje asistente."""
 
     def __init__(self, db: DB | None, providers: list[Provider] | None = None, daily_cap: int = 120,
-                 timeout: int = 90, sleep: Callable[[float], None] = time.sleep):
+                 timeout: int = 90, sleep: Callable[[float], None] = time.sleep, max_inline_wait: float = 25):
         self.db = db
         self.providers = providers if providers is not None else providers_from_env()
         self.daily_cap = daily_cap
         self.timeout = timeout
         self.sleep = sleep
+        self.max_inline_wait = max_inline_wait  # espera corta ante límites por minuto
         self.last_provider: str | None = None
 
     # -- contabilidad de uso ---------------------------------------------------
@@ -115,6 +147,7 @@ class LLM:
             raise QuotaExhausted(f"Tope diario propio alcanzado ({self.daily_cap} llamadas).")
         errors: list[str] = []
         all_429 = True
+        waits: list[float] = []
         for p in self.providers:
             body: dict[str, Any] = {"model": p.model, "messages": messages, "temperature": temperature}
             if tools:
@@ -158,17 +191,25 @@ class LLM:
                 detail = redact(r.text[:300])
                 errors.append(f"{p.name}: HTTP {r.status_code} {detail}")
                 if r.status_code == 429:
-                    break  # cuota: pasar al siguiente proveedor sin insistir
+                    ra = retry_after_seconds(r)
+                    if ra is not None and ra <= self.max_inline_wait and attempt == 0:
+                        self.sleep(ra + 0.5)  # límite por minuto: esperar lo indicado y reintentar
+                        continue
+                    waits.append(ra if ra is not None else 300.0)
+                    break  # cuota: pasar al siguiente proveedor
                 all_429 = False
                 if r.status_code in (500, 502, 503, 504):
                     self.sleep(3 * (attempt + 1))
                     continue
+                if r.status_code == 400 and "tool_use_failed" in r.text and attempt == 0:
+                    continue  # el modelo generó una llamada mal formada: un reintento
                 if r.status_code == 400 and json_mode and "response_format" in body:
                     body.pop("response_format")  # algunos modelos no soportan json_mode
                     continue
                 break  # 401/403/404/400: error de configuración, siguiente proveedor
         if all_429:
-            raise QuotaExhausted("Todos los proveedores devolvieron 429: " + " | ".join(errors))
+            raise QuotaExhausted("Todos los proveedores devolvieron 429: " + " | ".join(errors),
+                                 retry_after=min(waits) if waits else None)
         raise LLMError("Fallaron todos los proveedores: " + " | ".join(errors))
 
 
@@ -182,10 +223,12 @@ class ScriptedLLM:
     def __init__(self, script: list):
         self.script = list(script)
         self.calls: list[list[dict]] = []
+        self.tools_sent: list[bool] = []
         self.last_provider = "scripted"
 
     def chat(self, messages, tools=None, json_mode=False, temperature=0.2):
         self.calls.append(json.loads(json.dumps(messages)))
+        self.tools_sent.append(bool(tools))
         if not self.script:
             raise LLMError("ScriptedLLM: guion agotado")
         item = self.script.pop(0)

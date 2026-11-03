@@ -22,8 +22,8 @@ def test_simple_job_plans_then_answers(settings, db):
     assert out.status == "done" and "Hola" in out.text and "✅" in out.text
     j = db.one("SELECT * FROM jobs WHERE id=?", (jid,))
     assert json.loads(j["plan"])["complejidad"] == "simple"
-    # En tareas simples no se envían herramientas (ahorro de tokens)
-    assert len(app.llm.calls) == 2
+    # Las herramientas se envían siempre (gpt-oss las invoca aunque la tarea sea "simple")
+    assert len(app.llm.calls) == 2 and app.llm.tools_sent[1] is True
 
 
 def test_success_criteria_defined_before_execution(settings, db):
@@ -207,3 +207,17 @@ def test_context_compaction_keeps_requests_small(settings, db):
     out = app.agent._compact(msgs)
     assert sum(len(m["content"]) for m in out) < 12000
     assert out[-1]["content"] == "x" * 4000 or len(out[-1]["content"]) <= 3000
+
+
+
+def test_false_memory_claim_is_caught_and_corrected(settings, db):
+    """Caso real del CI: el modelo dijo 'lo guardé en memoria' sin llamar a memory_save."""
+    app = make_app(settings, db, [
+        plan("simple"), "Listo, guardé en tu memoria que tu empresa es Electro Sur.",
+        tool_call("memory_save", {"content": "La empresa del usuario es Electro Sur", "kind": "fact"}),
+        "Guardado en memoria: tu empresa es Electro Sur."])
+    _, out = _run(app, "guardá en tu memoria que mi empresa es Electro Sur")
+    assert out.status == "done" and "✅" in out.text
+    revision = app.llm.calls[2][-1]["content"]
+    assert "memory_save" in revision
+    assert Memory(db).search("empresa electro sur")

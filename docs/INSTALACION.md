@@ -82,10 +82,10 @@ python -m agente poll         # o: python -m agente ask "tu objetivo" (sin Teleg
 | Variable | Por defecto | Efecto |
 |---|---|---|
 | `AGENTE_LLM_PROVIDERS` | `groq,gemini,openrouter,ollama` | Orden de la cadena de proveedores |
-| `GROQ_MODEL` / `GEMINI_MODEL` / `OPENROUTER_MODEL` | `openai/gpt-oss-120b` / `gemini-flash-latest` / `openrouter/free` | Modelo por proveedor (los catálogos cambian: verificá) |
+| `GROQ_MODEL` / `GEMINI_MODEL` / `OPENROUTER_MODEL` | `openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b` (lista: cada modelo de Groq tiene su propia cuota y se usan en cadena) / `gemini-flash-latest` / `openrouter/free` | Modelo por proveedor (los catálogos cambian: verificá) |
 | `AGENTE_LLM_DAILY_CAP` | 120 | Tope propio de llamadas/día (protege la cuota gratuita) |
 | `AGENTE_MAX_LLM_CALLS` / `AGENTE_MAX_TOOL_CALLS` / `AGENTE_MAX_SECONDS` | 14 / 24 / 420 | Presupuesto por trabajo |
-| `AGENTE_CONTEXT_CHARS` | 24000 | Tamaño máximo de contexto enviado (cuotas gratuitas ≈ 8k tokens/pedido) |
+| `AGENTE_CONTEXT_CHARS` | 14000 | Tamaño máximo de contexto enviado (cuotas gratuitas ≈ 8k tokens/pedido) |
 | `AGENTE_TZ` | America/Argentina/Buenos_Aires | Zona horaria de tareas diarias |
 | `SEARXNG_URL` / `BRAVE_API_KEY` | — | Motores de búsqueda opcionales (si no: DuckDuckGo → Wikipedia) |
 | `OLLAMA_BASE_URL` | — | Modelo local propio, sin cuotas |

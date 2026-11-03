@@ -266,6 +266,8 @@ class App:
         now = time.time()
         if "Tope diario" in str(err):
             until = (int(now // 86400) + 1) * 86400 + 60
+        elif getattr(err, "retry_after", None) is not None:
+            until = now + max(15.0, min(float(err.retry_after), 86400.0))  # lo que indicó el proveedor
         else:
             strikes = int(self.db.kv_get("quota_strikes", "0") or 0) + 1
             self.db.kv_set("quota_strikes", str(strikes))
@@ -317,6 +319,21 @@ class App:
                 stats["requeued"] += 1
             self.outbox.flush()
         return stats
+
+    def process_until_done(self, job_id: int, deadline: float, sleep=time.sleep) -> str:
+        """Procesa la cola hasta que el trabajo termine, respetando pausas por cuota (uso interactivo:
+        `agente ask` y evaluación en vivo). Devuelve el estado final o el actual al vencer el plazo."""
+        while True:
+            st = self.process_jobs(deadline)
+            row = self.db.one("SELECT status FROM jobs WHERE id=?", (job_id,))
+            status = row["status"] if row else "missing"
+            if status in ("done", "failed", "cancelled", "waiting_approval", "missing"):
+                return status
+            now = time.time()
+            if now >= deadline:
+                return status
+            wait = (st.get("paused_until") or now + 2) - now
+            sleep(max(1.0, min(wait, deadline - now)))
 
     def run_once(self, max_seconds: int | None = None) -> dict:
         """Una pasada completa (modo GitHub Actions/cron)."""

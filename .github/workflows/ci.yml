@@ -83,7 +83,7 @@ jobs:
     needs: [pruebas, proveedor]
     if: needs.proveedor.outputs.ok == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -103,8 +103,8 @@ jobs:
   # Persistencia real entre DOS runners distintos usando el mismo mecanismo que el despliegue
   # (estado cifrado en una rama git). Datos de prueba no sensibles; la rama se borra al final.
   persistencia-1:
-    needs: [pruebas, proveedor]
-    if: needs.proveedor.outputs.ok == 'true'
+    needs: [pruebas, proveedor, en-vivo]   # en serie: comparten la cuota por minuto del proveedor
+    if: always() && needs.pruebas.result == 'success' && needs.proveedor.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {contents: write}
@@ -123,6 +123,8 @@ jobs:
       - name: Sesión 1 — enseñar un dato
         run: |
           python -m agente ask "Guardá en tu memoria: mi empresa se llama Electro Sur SRL y vende cables en Mendoza."
+          # La afirmación "lo guardé" no alcanza: se comprueba que la memoria realmente exista.
+          python -c "import os,sys; from agente.db import DB; from agente.memory import Memory; m=Memory(DB(os.environ['AGENTE_DATA_DIR']+'/agente.db')).search('Electro Sur'); print('memorias encontradas:', len(m)); sys.exit(0 if m else 1)"
       - name: Guardar estado cifrado en rama temporal
         run: |
           python -m agente state pack data /tmp/estado/estado.enc

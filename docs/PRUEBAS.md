@@ -1,6 +1,6 @@
 # Pruebas y resultados
 
-## 1. Batería determinista — **74/74 superadas (100 %)**
+## 1. Batería determinista — **92/92 superadas (100 %)**
 Local (contenedor de desarrollo) y **en GitHub Actions** (`flynnvertical/Atlas.zip`, runs
 41694120442 y 41695074464, Ubuntu, Python 3.12): verde, con la prueba de *sandbox sin red* obligatoria en CI.
 Evidencia completa: [`reports/pytest_resultados.txt`](../reports/pytest_resultados.txt).
@@ -42,6 +42,7 @@ Historial real del 2026-11-03:
 | 41685463295 (intento 2, ya en `flynnvertical`) | 70 ✔, 1 ✘, 1 omitida | `pandas` faltaba en `requirements.txt`; sandbox sin red no disponible en runners (unshare restringido) → **corregidos** |
 | 41694120442 | Pruebas ✔ · en vivo **0/13** | Todas las llamadas al modelo: `HTTP 200 text/plain "OK"` → **GitHub Models está retirado desde 2026-07-30** |
 | 41695074464 | Pruebas ✔ · en vivo 0/13 (diagnóstico confirmado) | Ídem; el error ahora se informa en vez de ocultarse |
+| 41704745202 (intento 2, ya con `GROQ_API_KEY`) | Pruebas ✔ · token ✔ · en vivo **1/13** · persistencia ✘ | (1) gpt-oss invocó una herramienta en una tarea clasificada "simple" a la que no se le enviaron herramientas → Groq `400 tool_use_failed`; (2) un 429 por límite **por minuto** activó una pausa fija de 5 min que frenó el resto; (3) el modelo afirmó "lo guardé en memoria" sin llamar a `memory_save` y la verificación no lo detectó → **corregidos** (herramientas siempre disponibles, `Retry-After` respetado, cadena de 3 modelos de Groq, control de acciones afirmadas, comprobación real de la memoria en CI) |
 
 Un 0/13 por falta de modelo no mide la calidad del agente: desde esta versión, sin clave el CI
 informa **NO EJECUTADA** (advertencia visible) en lugar de un porcentaje engañoso, y con clave el job

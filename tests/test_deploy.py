@@ -244,3 +244,31 @@ def test_webhook_returns_503_when_worker_is_down(settings, monkeypatch):
         assert r.status_code == 503  # Telegram reintenta en lugar de darlo por entregado
     finally:
         httpd.shutdown()
+
+
+
+def test_quota_pause_uses_provider_retry_after(settings, db):
+    from agente.app import App
+    from agente.llm import QuotaExhausted
+    from agente.scheduler import enqueue
+    app = App(settings, db=db, llm=ScriptedLLM([QuotaExhausted("429 TPM", retry_after=40)]))
+    enqueue(db, 111, "tarea")
+    until = app.process_jobs(time.time() + 30)["paused_until"]
+    assert 35 < until - time.time() <= 41  # no 5 minutos fijos ante un límite por minuto
+
+
+
+def test_process_until_done_waits_through_quota_pause(settings, db):
+    from agente.app import App
+    from agente.llm import QuotaExhausted
+    from agente.scheduler import enqueue
+    from .conftest import plan as plan_
+    app = App(settings, db=db, llm=ScriptedLLM([QuotaExhausted("429", retry_after=20), plan_("simple"), "hola"]))
+    jid = enqueue(db, 111, "hola")
+    slept = []
+
+    def fake_sleep(sec):
+        slept.append(sec)
+        db.kv_set("quota_until", "0")  # simula que la pausa venció
+    assert app.process_until_done(jid, time.time() + 120, sleep=fake_sleep) == "done"
+    assert slept and 15 <= slept[0] <= 21

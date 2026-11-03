@@ -217,7 +217,9 @@ class Agent:
                                         partial=f"presupuesto de {over} agotado", verify_llm=False,
                                         checkpoint=checkpoint)
 
-                msg = llm_call(self._compact(messages), tools=None if simple else tool_schemas)
+                # Las herramientas se envían siempre: algunos modelos (p. ej. gpt-oss) las invocan aunque
+                # la tarea se haya clasificado como simple, y sin ellas el proveedor rechaza el pedido.
+                msg = llm_call(self._compact(messages), tools=tool_schemas)
                 tool_calls = msg.get("tool_calls") or []
                 clean = {"role": "assistant", "content": msg.get("content")}
                 if tool_calls:
@@ -328,7 +330,7 @@ class Agent:
     # ------------------------------------------------------------------ verificación y cierre
     def _verify_or_revise(self, job, messages, ctx, counters, plan, answer, llm_call, simple):
         v = deterministic_checks(answer, ctx.seen_urls, ctx.created_files, ctx.workspace,
-                                 used_web=bool(ctx.seen_urls))
+                                 used_web=bool(ctx.seen_urls), tools_ok=self._tools_ok(job["id"]))
         # El auditor (LLM) sólo corre si los controles deterministas pasaron: ahorra cuota.
         if v.passed and not simple and counters["llm_calls"] < self.s.budget.max_llm_calls - 1:
             evidence = {
@@ -361,11 +363,15 @@ class Agent:
                          "decilo explícitamente en lugar de afirmarlo. Luego entregá la respuesta final completa."})
         return None
 
+    def _tools_ok(self, job_id: int) -> set[str]:
+        return {r["tool"] for r in self.db.all(
+            "SELECT DISTINCT tool FROM action_log WHERE job_id=? AND status='ok'", (job_id,))}
+
     def _finish(self, job, messages, ctx, counters, plan, answer, verification=None, partial=None,
                 verify_llm=True, checkpoint=None) -> JobOutcome:
         if verification is None:
             verification = deterministic_checks(answer, ctx.seen_urls, ctx.created_files, ctx.workspace,
-                                                used_web=bool(ctx.seen_urls))
+                                                used_web=bool(ctx.seen_urls), tools_ok=self._tools_ok(job["id"]))
         if partial:
             verification.passed = False
             verification.issues.insert(0, f"Resultado PARCIAL: {partial}.")

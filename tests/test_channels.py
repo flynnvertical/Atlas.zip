@@ -233,6 +233,10 @@ def test_retired_github_models_not_used_by_default(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghs_" + "x" * 36)  # presente en todo runner de Actions
     assert providers_from_env() == []  # GitHub Models fue retirado el 2026-07-30
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    names = [p.name for p in providers_from_env()]
+    assert names == ["groq/gpt-oss-120b", "groq/llama-3.3-70b-versatile", "groq/gpt-oss-20b"]
+    monkeypatch.setenv("GROQ_MODEL", "openai/gpt-oss-120b")
     assert [p.name for p in providers_from_env()] == ["groq"]
 
 
@@ -289,3 +293,42 @@ def test_pairing_closed_when_allowlist_configured(settings, db, messenger, monke
     app = make_app(settings, db, [], messenger)  # settings.telegram_allowed = {111}
     app.handle_update(_pm("/vincular codigo-secreto-123", user_id=555, update_id=1))
     assert not app.authorized(555)
+
+
+
+def test_llm_honors_short_retry_after(server, db):
+    seq = [429, 200]
+
+    def route(method, path, body):
+        st = seq.pop(0)
+        if st == 429:
+            return 429, {"Content-Type": "application/json", "retry-after": "2"}, b'{"error":"rate limit TPM"}'
+        return 200, {"Content-Type": "application/json"}, json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).encode()
+    s = server({"/v1/chat/completions": route})
+    waits = []
+    llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=waits.append)
+    assert llm.chat([{"role": "user", "content": "x"}])["content"] == "ok"
+    assert waits == [2.5]  # esperó lo indicado y reintentó el mismo proveedor
+
+
+def test_llm_long_retry_after_is_reported(server, db):
+    msg_ = b'{"error":{"message":"Rate limit reached on tokens per day (TPD). Please try again in 2m3.5s."}}'
+    s = server({"/v1/chat/completions": lambda *a: (429, {"Content-Type": "application/json"}, msg_)})
+    llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
+    with pytest.raises(QuotaExhausted) as e:
+        llm.chat([{"role": "user", "content": "x"}])
+    assert e.value.retry_after == pytest.approx(123.5)
+
+
+def test_llm_retries_tool_use_failed_once(server, db):
+    seq = [400, 200]
+
+    def route(method, path, body):
+        if seq.pop(0) == 400:
+            return 400, {"Content-Type": "application/json"}, b'{"error":{"code":"tool_use_failed"}}'
+        return 200, {"Content-Type": "application/json"}, json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).encode()
+    s = server({"/v1/chat/completions": route})
+    llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
+    assert llm.chat([{"role": "user", "content": "x"}])["content"] == "ok"

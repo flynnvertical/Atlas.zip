@@ -43,7 +43,7 @@ class Settings:
     run_seconds: int
     budget: Budget = field(default_factory=Budget)
     sandbox_network: bool = False
-    context_chars: int = 24000
+    context_chars: int = 14000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -70,7 +70,7 @@ class Settings:
             llm_daily_cap=_int("AGENTE_LLM_DAILY_CAP", 120),
             run_seconds=_int("AGENTE_RUN_SECONDS", 480),
             budget=b,
-            context_chars=_int("AGENTE_CONTEXT_CHARS", 24000),
+            context_chars=_int("AGENTE_CONTEXT_CHARS", 14000),
         )
 
     def ensure_dirs(self) -> None:

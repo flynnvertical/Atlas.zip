@@ -150,7 +150,7 @@ def web_search(ctx: ToolContext, query: str, max_results: int = 6) -> str:
     return wrap_untrusted(f"búsqueda:{used}", "\n".join(lines)) + "\n" + note
 
 
-def fetch_url(ctx: ToolContext, url: str, max_chars: int = 8000, start: int = 0) -> str:
+def fetch_url(ctx: ToolContext, url: str, max_chars: int = 5000, start: int = 0) -> str:
     max_chars = max(500, min(int(max_chars), 20000))
     try:
         r = _get(url)
@@ -231,7 +231,7 @@ TOOLS = [
           "required": ["query"]}, web_search, EXTERNAL),
     Tool("fetch_url", "Descarga y lee una página web, PDF o JSON público. Usalo para verificar fuentes.",
          {"type": "object", "properties": {
-             "url": {"type": "string"}, "max_chars": {"type": "integer", "default": 8000},
+             "url": {"type": "string"}, "max_chars": {"type": "integer", "default": 5000},
              "start": {"type": "integer", "default": 0}}, "required": ["url"]}, fetch_url, EXTERNAL),
     Tool("download_file", "Descarga un archivo público (PDF, XLSX, CSV, etc.) al espacio de trabajo.",
          {"type": "object", "properties": {"url": {"type": "string"}, "filename": {"type": "string"}},

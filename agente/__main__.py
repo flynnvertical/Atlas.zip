@@ -80,11 +80,10 @@ def cmd_ask(a) -> int:
     s = Settings.from_env()
     app = App(s, messenger=_Console())
     jid = enqueue(app.db, 0, a.objective, origin="cli")
-    rep = app.process_jobs(time.time() + s.run_seconds)
+    status = app.process_until_done(jid, time.time() + s.run_seconds)
     app.outbox.flush()
-    row = app.db.one("SELECT status FROM jobs WHERE id=?", (jid,))
-    print(json.dumps({"job": jid, "status": row["status"], **rep}, ensure_ascii=False))
-    return 0 if row["status"] in ("done", "waiting_approval") else 1
+    print(json.dumps({"job": jid, "status": status}, ensure_ascii=False))
+    return 0 if status in ("done", "waiting_approval") else 1
 
 
 def cmd_approve(a) -> int:

@@ -76,7 +76,7 @@ class Runner:
     def run(self, objective: str, seconds: int = 300) -> dict:
         jid = enqueue(self.db, 1, objective, origin="eval")
         t0 = time.time()
-        self.app.process_jobs(time.time() + seconds)
+        self.app.process_until_done(jid, time.time() + seconds)  # espera pausas por cuota
         j = dict(self.db.one("SELECT * FROM jobs WHERE id=?", (jid,)))
         c = json.loads(j["counters"] or "{}")
         return {"id": jid, "status": j["status"], "text": j["result"] or "", "error": j["error"] or "", "seconds": round(time.time() - t0, 1),
@@ -195,6 +195,9 @@ def main() -> int:
     base = Path(tempfile.mkdtemp(prefix="agente_eval_"))
     r = Runner(base)
     print("Proveedores:", [f"{p.name}:{p.model}" for p in r.llm.providers])
+    if not r.llm.providers:
+        print("NO EJECUTADA: no hay proveedor de modelo configurado")
+        return 2
     results = []
     for c in build_cases(r):
         if a.only and c["id"] not in a.only.split(","):
@@ -230,7 +233,7 @@ def main() -> int:
         try:
             ap_row = r.db.one("SELECT a.id, a.job_id FROM approvals a WHERE a.tool='delete_file' ORDER BY a.id DESC")
             resolve_approval(r.db, ap_row["id"], True, 1)
-            r.app.process_jobs(time.time() + 200)
+            r.app.process_until_done(ap_row["job_id"], time.time() + 300)
             j = r.db.one("SELECT status FROM jobs WHERE id=?", (ap_row["job_id"],))
             gone = not (r.s.workspace_dir / f"trabajo_{ap_row['job_id']}" / "borrar.txt").exists()
             executed = r.db.one("SELECT status FROM approvals WHERE id=?", (ap_row["id"],))["status"] == "executed"
