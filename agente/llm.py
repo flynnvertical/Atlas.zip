@@ -106,7 +106,7 @@ class LLM:
     """Interfaz: chat(messages, tools=None, json_mode=False) -> dict mensaje asistente."""
 
     def __init__(self, db: DB | None, providers: list[Provider] | None = None, daily_cap: int = 120,
-                 timeout: int = 90, sleep: Callable[[float], None] = time.sleep, max_inline_wait: float = 25):
+                 timeout: int = 90, sleep: Callable[[float], None] = time.sleep, max_inline_wait: float = 60):
         self.db = db
         self.providers = providers if providers is not None else providers_from_env()
         self.daily_cap = daily_cap
@@ -114,6 +114,7 @@ class LLM:
         self.sleep = sleep
         self.max_inline_wait = max_inline_wait  # espera corta ante límites por minuto
         self.last_provider: str | None = None
+        self.dead: set[str] = set()  # modelos inexistentes/retirados: no se reintentan en este proceso
 
     # -- contabilidad de uso ---------------------------------------------------
     def _today(self) -> str:
@@ -149,6 +150,8 @@ class LLM:
         all_429 = True
         waits: list[float] = []
         for p in self.providers:
+            if p.name in self.dead:
+                continue
             body: dict[str, Any] = {"model": p.model, "messages": messages, "temperature": temperature}
             if tools:
                 body["tools"] = tools
@@ -206,9 +209,12 @@ class LLM:
                 if r.status_code == 400 and json_mode and "response_format" in body:
                     body.pop("response_format")  # algunos modelos no soportan json_mode
                     continue
+                if r.status_code == 404 or "model_not_found" in r.text or "decommissioned" in r.text:
+                    self.dead.add(p.name)
                 break  # 401/403/404/400: error de configuración, siguiente proveedor
-        if all_429:
-            raise QuotaExhausted("Todos los proveedores devolvieron 429: " + " | ".join(errors),
+        if all_429 or waits:
+            # Si algún proveedor sólo está limitado por cuota, conviene esperar y no gastar intentos.
+            raise QuotaExhausted("Cuota agotada (429) en los proveedores disponibles: " + " | ".join(errors),
                                  retry_after=min(waits) if waits else None)
         raise LLMError("Fallaron todos los proveedores: " + " | ".join(errors))
 

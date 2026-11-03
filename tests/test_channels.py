@@ -332,3 +332,22 @@ def test_llm_retries_tool_use_failed_once(server, db):
     s = server({"/v1/chat/completions": route})
     llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
     assert llm.chat([{"role": "user", "content": "x"}])["content"] == "ok"
+
+
+def test_mixed_429_and_dead_model_pauses_instead_of_failing(server, db):
+    """Caso real (L03): un modelo con 429 por minuto y otro inexistente -> pausa, no fallo del trabajo."""
+    a = server({"/v1/chat/completions": lambda *x: (
+        429, {"Content-Type": "application/json"}, b'{"error":{"message":"TPM. Please try again in 90s."}}')})
+    b_calls = []
+
+    def dead(*x):
+        b_calls.append(1)
+        return 404, {"Content-Type": "application/json"}, b'{"error":{"code":"model_not_found"}}'
+    b = server({"/v1/chat/completions": dead})
+    llm = LLM(db, [Provider("a", a.url + "/v1/chat/completions", "m", None),
+                   Provider("b", b.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
+    for _ in range(2):
+        with pytest.raises(QuotaExhausted) as e:
+            llm.chat([{"role": "user", "content": "x"}])
+        assert e.value.retry_after == 90
+    assert len(b_calls) == 1  # el modelo inexistente no se vuelve a consultar

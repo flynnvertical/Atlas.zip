@@ -106,7 +106,10 @@ class Memory:
         """Bloque de contexto: preferencias/instrucciones vigentes + memorias relevantes."""
         seen: set[int] = set()
         lines: list[str] = []
-        for m in self.recent(6, ("preference", "instruction")) + self.search(objective, limit):
+        # Memoria personal = pocos registros: además de las coincidencias por texto, siempre se incluyen
+        # las más recientes (la búsqueda léxica no une "vende" con "venta" ni "empresa" con "nombre").
+        for m in (self.recent(6, ("preference", "instruction")) + self.search(objective, limit)
+                  + self.recent(6)):
             if m["id"] in seen:
                 continue
             seen.add(m["id"])

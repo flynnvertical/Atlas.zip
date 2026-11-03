@@ -89,6 +89,7 @@ class Runner:
 
 def num_in(text: str, target: float) -> bool:
     """Acepta 422222.04 / 422.222,04 / 422,222.04."""
+    text = re.sub(r"(?<=\d)[\s\u00a0\u2009\u202f](?=\d{3}\b)", "", text)  # 422 222,04 -> 422222,04
     for tok in re.findall(r"\d[\d.,]*\d", text):
         for cand in (tok.replace(",", ""), tok.replace(".", "").replace(",", ".")):
             try:

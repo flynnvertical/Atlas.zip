@@ -221,3 +221,18 @@ def test_false_memory_claim_is_caught_and_corrected(settings, db):
     revision = app.llm.calls[2][-1]["content"]
     assert "memory_save" in revision
     assert Memory(db).search("empresa electro sur")
+
+
+def test_empty_model_answer_is_requested_again(settings, db):
+    """Caso real (L06): gpt-oss devolvió contenido vacío como respuesta final."""
+    app = make_app(settings, db, [plan(), {"role": "assistant", "content": ""}, "Total general: 25000", AUDIT_OK])
+    _, out = _run(app)
+    assert out.status == "done" and "25000" in out.text and "✅" in out.text
+    assert "llegó vacía" in app.llm.calls[2][-1]["content"]
+
+
+def test_memory_context_includes_recent_facts_without_word_match(db):
+    """Caso real (L14): se guardó 'venta de materiales' y se preguntó '¿qué vende mi empresa?'."""
+    Memory(db).save('{"nombre": "Electro Sur SRL", "actividad": "venta de materiales eléctricos"}',
+                    kind="fact", source="agent")
+    assert "Electro Sur SRL" in Memory(db).context_for("¿Cómo se llama mi empresa y qué vende?")

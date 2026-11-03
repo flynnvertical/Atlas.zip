@@ -2,7 +2,7 @@
 platform linux -- Python 3.13.18, pytest-9.2.0, pluggy-1.7.0 -- /usr/local/bin/python3
 rootdir: /home/user/Atlas.zip
 plugins: anyio-4.15.1
-collecting ... collected 92 items
+collecting ... collected 95 items
 
 tests/test_agent.py::test_simple_job_plans_then_answers PASSED
 tests/test_agent.py::test_success_criteria_defined_before_execution PASSED
@@ -22,6 +22,8 @@ tests/test_agent.py::test_memory_context_injected_and_learned PASSED
 tests/test_agent.py::test_generated_files_are_delivered PASSED
 tests/test_agent.py::test_context_compaction_keeps_requests_small PASSED
 tests/test_agent.py::test_false_memory_claim_is_caught_and_corrected PASSED
+tests/test_agent.py::test_empty_model_answer_is_requested_again PASSED
+tests/test_agent.py::test_memory_context_includes_recent_facts_without_word_match PASSED
 tests/test_channels.py::test_unauthorized_users_ignored_but_id_answered PASSED
 tests/test_channels.py::test_duplicate_updates_processed_once PASSED
 tests/test_channels.py::test_commands_memory_and_status PASSED
@@ -49,6 +51,7 @@ tests/test_channels.py::test_pairing_closed_when_allowlist_configured PASSED
 tests/test_channels.py::test_llm_honors_short_retry_after PASSED
 tests/test_channels.py::test_llm_long_retry_after_is_reported PASSED
 tests/test_channels.py::test_llm_retries_tool_use_failed_once PASSED
+tests/test_channels.py::test_mixed_429_and_dead_model_pauses_instead_of_failing PASSED
 tests/test_deploy.py::test_state_sync_roundtrip_between_two_hosts PASSED
 tests/test_deploy.py::test_state_sync_detects_concurrent_writer PASSED
 tests/test_deploy.py::test_webhook_server_end_to_end PASSED
@@ -97,4 +100,4 @@ tests/test_tools.py::test_run_python_timeout PASSED
 tests/test_tools.py::test_calculator_safe PASSED
 tests/test_tools.py::test_redaction_of_secrets PASSED
 
-============================= 92 passed in 24.30s ==============================
+============================= 95 passed in 25.69s ==============================

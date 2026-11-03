@@ -134,6 +134,7 @@ jobs:
 
   persistencia-2:
     needs: persistencia-1
+    if: always() && needs.persistencia-1.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {contents: write}
