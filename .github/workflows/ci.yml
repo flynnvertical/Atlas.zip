@@ -156,7 +156,14 @@ jobs:
           git show FETCH_HEAD:estado.enc > /tmp/estado.enc
           python -m agente state unpack /tmp/estado.enc data
           python -m agente ask "¿Cómo se llama mi empresa y qué vende? Respondé en una línea." | tee /tmp/salida.txt
-          grep -qi "electro sur" /tmp/salida.txt && echo "PERSISTENCIA OK: recordó el dato en otra máquina"
+          # Exige que lo diga y que la respuesta haya pasado la verificación (normaliza espacios Unicode).
+          python - <<'PY'
+          import re, sys
+          t = re.sub(r"[\u00a0\u2007\u2009\u202f]", " ", open("/tmp/salida.txt", encoding="utf-8").read()).lower()
+          ok = "electro sur" in t and "verificación superada" in t and "no superada" not in t
+          print("PERSISTENCIA OK: recordó el dato en otra máquina" if ok else "PERSISTENCIA FALLÓ")
+          sys.exit(0 if ok else 1)
+          PY
       - name: Borrar rama temporal
         if: always()
         run: git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" --delete "ci-state-${{ github.run_id }}" || true

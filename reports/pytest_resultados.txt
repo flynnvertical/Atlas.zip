@@ -2,7 +2,7 @@
 platform linux -- Python 3.13.18, pytest-9.2.0, pluggy-1.7.0 -- /usr/local/bin/python3
 rootdir: /home/user/Atlas.zip
 plugins: anyio-4.15.1
-collecting ... collected 95 items
+collecting ... collected 98 items
 
 tests/test_agent.py::test_simple_job_plans_then_answers PASSED
 tests/test_agent.py::test_success_criteria_defined_before_execution PASSED
@@ -24,6 +24,7 @@ tests/test_agent.py::test_context_compaction_keeps_requests_small PASSED
 tests/test_agent.py::test_false_memory_claim_is_caught_and_corrected PASSED
 tests/test_agent.py::test_empty_model_answer_is_requested_again PASSED
 tests/test_agent.py::test_memory_context_includes_recent_facts_without_word_match PASSED
+tests/test_agent.py::test_cited_wikipedia_url_with_parentheses_verifies PASSED
 tests/test_channels.py::test_unauthorized_users_ignored_but_id_answered PASSED
 tests/test_channels.py::test_duplicate_updates_processed_once PASSED
 tests/test_channels.py::test_commands_memory_and_status PASSED
@@ -99,5 +100,7 @@ tests/test_tools.py::test_code_without_fs_isolation_always_needs_approval PASSED
 tests/test_tools.py::test_run_python_timeout PASSED
 tests/test_tools.py::test_calculator_safe PASSED
 tests/test_tools.py::test_redaction_of_secrets PASSED
+tests/test_tools.py::test_url_extraction_handles_parentheses_and_cjk_brackets PASSED
+tests/test_tools.py::test_user_memory_origin_not_accepted_after_untrusted_content PASSED
 
-============================= 95 passed in 25.69s ==============================
+============================= 98 passed in 25.89s ==============================

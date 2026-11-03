@@ -120,5 +120,5 @@ class Memory:
             )
         if not lines:
             return ""
-        return ("MEMORIA PERSISTENTE (puede estar desactualizada; las de origen=agent son conclusiones "
-                "previas, no hechos verificados):\n" + "\n".join(lines[:limit + 4]))
+        return ("MEMORIA PERSISTENTE (puede estar desactualizada). origen=user: lo dijo el usuario (válido para "
+                "responderle sobre sí mismo); origen=agent: conclusiones previas, no hechos verificados:\n" + "\n".join(lines[:limit + 4]))

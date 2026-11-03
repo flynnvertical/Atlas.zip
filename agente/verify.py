@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .tools.web import normalize_url
 
-URL_RX = re.compile(r"https?://[^\s<>\]\)\"'`,;]+")
+URL_RX = re.compile(r"https?://[^\s<>\]\"'`,;【】「」《》“”]+")
 
 
 @dataclass
@@ -29,7 +29,14 @@ class Verification:
 
 
 def extract_urls(text: str) -> list[str]:
-    return [u.rstrip(".") for u in URL_RX.findall(text or "")]
+    out = []
+    for u in URL_RX.findall(text or ""):
+        # Recorta puntuación final y paréntesis de cierre sin abrir (p. ej. "(ver https://x.org/a)"),
+        # pero conserva los balanceados: https://es.wikipedia.org/wiki/Rayuela_(novela)
+        while u and (u[-1] in ".:!?*_" or (u[-1] == ")" and u.count(")") > u.count("("))):
+            u = u[:-1]
+        out.append(u)
+    return out
 
 
 # Afirmaciones de acciones que deben estar respaldadas por una herramienta ejecutada con éxito.

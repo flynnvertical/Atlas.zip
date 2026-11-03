@@ -1,6 +1,6 @@
 # Pruebas y resultados
 
-## 1. Batería determinista — **95/95 superadas (100 %)**
+## 1. Batería determinista — **98/98 superadas (100 %)**
 Local (contenedor de desarrollo) y **en GitHub Actions** (`flynnvertical/Atlas.zip`, runs
 41694120442 y 41695074464, Ubuntu, Python 3.12): verde, con la prueba de *sandbox sin red* obligatoria en CI.
 Evidencia completa: [`reports/pytest_resultados.txt`](../reports/pytest_resultados.txt).
@@ -44,6 +44,7 @@ Historial real del 2026-11-03:
 | 41695074464 | Pruebas ✔ · en vivo 0/13 (diagnóstico confirmado) | Ídem; el error ahora se informa en vez de ocultarse |
 | 41704745202 (intento 2, ya con `GROQ_API_KEY`) | Pruebas ✔ · token ✔ · en vivo **1/13** · persistencia ✘ | (1) gpt-oss invocó una herramienta en una tarea clasificada "simple" a la que no se le enviaron herramientas → Groq `400 tool_use_failed`; (2) un 429 por límite **por minuto** activó una pausa fija de 5 min que frenó el resto; (3) el modelo afirmó "lo guardé en memoria" sin llamar a `memory_save` y la verificación no lo detectó → **corregidos** (herramientas siempre disponibles, `Retry-After` respetado, cadena de 3 modelos de Groq, control de acciones afirmadas, comprobación real de la memoria en CI) |
 | 41706817830 | Pruebas ✔ · token ✔ (`@AgenteSupremoflynn_bot`) · en vivo **8/13 (61,5 %)** · persistencia-1 ✔ (memoria guardada de verdad) · persistencia-2 omitida | Fallos: L02 falso negativo del evaluador (respuesta correcta "422 222,04" con espacios finos); L03 429 por minuto con espera > 25 s mezclado con un modelo no disponible → error en vez de pausa; L06 respuesta final vacía de gpt-oss; L10 pidió confirmación por texto en vez de invocar la herramienta; L14 la memoria guardada no se recuperó (búsqueda léxica "vende"≠"venta") y buscó en internet → **corregidos**; persistencia-2 se omitía cuando fallaba un job anterior → corregido |
+| 41710294686 | Pruebas ✔ · token ✔ · en vivo **11/14 (78,6 %)** · persistencia-1 ✔ · persistencia-2 ✘ | L13 (aprobación real + reanudación) ✔. Fallos: L03 defecto real — el extractor de URLs cortaba `…/Rayuela_(novela)` y arrastraba `】`, y la verificación marcaba la cita como no consultada; L06 y L14 falsos negativos del evaluador (respuestas correctas con espacios Unicode U+202F); persistencia-2: **el dato sí se recuperó en la otra máquina**, pero el agente se negó a usarlo por ser "memoria no corroborada" (lo había guardado como origen=agent) → **corregidos** (extractor de URLs, `dicho_por_usuario` en `memory_save`, normalización en el evaluador y en CI) |
 
 Un 0/13 por falta de modelo no mide la calidad del agente: desde esta versión, sin clave el CI
 informa **NO EJECUTADA** (advertencia visible) en lugar de un porcentaje engañoso, y con clave el job

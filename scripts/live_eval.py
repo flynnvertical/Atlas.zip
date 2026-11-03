@@ -89,7 +89,7 @@ class Runner:
 
 def num_in(text: str, target: float) -> bool:
     """Acepta 422222.04 / 422.222,04 / 422,222.04."""
-    text = re.sub(r"(?<=\d)[\s\u00a0\u2009\u202f](?=\d{3}\b)", "", text)  # 422 222,04 -> 422222,04
+    text = re.sub(r"(?<=\d) (?=\d{3}\b)", "", norm(text))  # 422 222,04 -> 422222,04
     for tok in re.findall(r"\d[\d.,]*\d", text):
         for cand in (tok.replace(",", ""), tok.replace(".", "").replace(",", ".")):
             try:
@@ -100,8 +100,14 @@ def num_in(text: str, target: float) -> bool:
     return False
 
 
+def norm(text: str) -> str:
+    """Normaliza espacios y guiones Unicode que usan algunos modelos (U+00A0, U+202F, U+2011...)."""
+    text = re.sub(r"[\u00a0\u2007\u2009\u200a\u202f]", " ", text or "")
+    return re.sub(r"[\u2010\u2011\u2012\u2013]", "-", text)
+
+
 def has_any(text: str, *words) -> bool:
-    t = text.lower()
+    t = norm(text).lower()
     return any(w.lower() in t for w in words)
 
 
@@ -134,7 +140,7 @@ def build_cases(r: Runner):
          "Creá cotizacion.xlsx con 3 ítems (descripción, cantidad, precio unitario, subtotal) usando estos datos: "
          "cable 10 u x 1500, enchufe 20 u x 300, llave 5 u x 800. Decime el total general.",
          lambda o: o["status"] == "done" and (o["ws"] / "cotizacion.xlsx").exists()
-         and has_any(o["text"].replace(".", "").replace(",", ""), "25000"))
+         and num_in(o["text"], 25000))
     case("L07", "ejecución de código",
          "Usá run_python para calcular el número primo número 1000 (el milésimo primo) y decime cuál es.",
          lambda o: o["status"] == "done" and "7919" in o["text"] and "run_python" in o["tools"])

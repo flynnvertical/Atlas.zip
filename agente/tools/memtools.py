@@ -13,10 +13,12 @@ def memory_search(ctx: ToolContext, query: str, project: str = "") -> str:
 
 
 def memory_save(ctx: ToolContext, content: str, kind: str = "result", project: str = "",
-                confidence: str = "media") -> str:
-    mid = ctx.memory.save(content, kind=kind, project=project, source="agent",
-                          confidence=confidence, chat_id=ctx.chat_id)
-    return f"Guardado como mem#{mid} (origen=agent)."
+                confidence: str = "media", dicho_por_usuario: bool = False) -> str:
+    # Tras leer contenido externo no se acepta "lo dijo el usuario": una inyección podría plantarlo.
+    source = "user" if dicho_por_usuario and not ctx.tainted else "agent"
+    mid = ctx.memory.save(content, kind=kind, project=project, source=source,
+                          confidence="alta" if dicho_por_usuario else confidence, chat_id=ctx.chat_id)
+    return f"Guardado como mem#{mid} (origen={source})."
 
 
 def memory_correct(ctx: ToolContext, memory_id: int, new_content: str) -> str:
@@ -56,7 +58,9 @@ TOOLS = [
          "kind: preference|instruction|project|result|experience|fact.",
          {"type": "object", "properties": {
              "content": {"type": "string"}, "kind": {"type": "string"}, "project": {"type": "string"},
-             "confidence": {"type": "string", "enum": ["baja", "media", "alta"]}},
+             "confidence": {"type": "string", "enum": ["baja", "media", "alta"]},
+             "dicho_por_usuario": {"type": "boolean", "description":
+                                   "true si es un dato que el usuario afirmó sobre sí mismo o pidió recordar"}},
           "required": ["content"]}, memory_save, LOCAL_WRITE),
     Tool("memory_correct", "Corrige una memoria existente (conserva histórico).",
          {"type": "object", "properties": {"memory_id": {"type": "integer"}, "new_content": {"type": "string"}},

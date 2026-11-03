@@ -236,3 +236,12 @@ def test_memory_context_includes_recent_facts_without_word_match(db):
     Memory(db).save('{"nombre": "Electro Sur SRL", "actividad": "venta de materiales eléctricos"}',
                     kind="fact", source="agent")
     assert "Electro Sur SRL" in Memory(db).context_for("¿Cómo se llama mi empresa y qué vende?")
+
+
+def test_cited_wikipedia_url_with_parentheses_verifies(settings, db, server, monkeypatch):
+    from agente.tools import web as web_t
+    from agente.verify import deterministic_checks
+    seen = {web_t.normalize_url("https://es.wikipedia.org/wiki/Rayuela_(novela)")}
+    v = deterministic_checks("Cortázar, 1963 【VERIFICADO: https://es.wikipedia.org/wiki/Rayuela_(novela)】",
+                             seen, [], settings.workspace_dir, used_web=True, tools_ok=set())
+    assert v.passed, v.issues

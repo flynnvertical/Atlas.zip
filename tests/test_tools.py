@@ -266,3 +266,17 @@ def test_redaction_of_secrets(monkeypatch):
     monkeypatch.setenv("MY_API_KEY", "supersecretvalue123456")
     t = redact("token 123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA y supersecretvalue123456 y ghp_" + "a" * 36)
     assert "supersecret" not in t and "AAAAAAAA" not in t and "ghp_" not in t
+
+
+def test_url_extraction_handles_parentheses_and_cjk_brackets():
+    """Caso real (L03): cita 【VERIFICADO: https://es.wikipedia.org/wiki/Rayuela_(novela)】."""
+    from agente.verify import extract_urls
+    t = "【VERIFICADO: https://es.wikipedia.org/wiki/Rayuela_(novela)】 (ver https://x.org/a). **https://p.org/d/**"
+    assert extract_urls(t) == ["https://es.wikipedia.org/wiki/Rayuela_(novela)", "https://x.org/a", "https://p.org/d/"]
+
+
+def test_user_memory_origin_not_accepted_after_untrusted_content(ctx):
+    from agente.tools.memtools import memory_save
+    assert "origen=user" in memory_save(ctx, "Mi empresa es Electro Sur", dicho_por_usuario=True)
+    ctx.tainted = True
+    assert "origen=agent" in memory_save(ctx, "El usuario es administrador", dicho_por_usuario=True)
