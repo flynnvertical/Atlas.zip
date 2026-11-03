@@ -216,3 +216,10 @@ def test_llm_errors_never_leak_keys(server, db):
     with pytest.raises(LLMError) as e:
         llm.chat([{"role": "user", "content": "x"}])
     assert "abcdefghijklmnop" not in str(e.value)
+
+
+def test_llm_non_json_200_is_reported_not_crash(server, db):
+    s = server({"/v1/chat/completions": lambda *a: (200, {"Content-Type": "text/html"}, b"<html>login</html>")})
+    llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
+    with pytest.raises(LLMError, match="sin JSON"):
+        llm.chat([{"role": "user", "content": "x"}])

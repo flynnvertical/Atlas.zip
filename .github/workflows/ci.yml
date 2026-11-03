@@ -53,6 +53,15 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
+      - name: Diagnóstico del endpoint de GitHub Models (sin secretos en la salida)
+        continue-on-error: true
+        run: |
+          curl -sS -o /tmp/resp.txt -w "HTTP %{http_code} | %{content_type}\n" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
+            -H "Accept: application/json" -H "X-GitHub-Api-Version: 2026-03-10" \
+            https://models.github.ai/inference/chat/completions \
+            -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"Decí OK"}],"max_tokens":5}'
+          head -c 400 /tmp/resp.txt; echo
       - name: Evaluación en vivo (modelo real + internet real)
         run: python scripts/live_eval.py --out reports/live_eval.json --only "${{ github.event.inputs.only }}"
       - uses: actions/upload-artifact@v4

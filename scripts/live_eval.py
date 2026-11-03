@@ -79,7 +79,7 @@ class Runner:
         self.app.process_jobs(time.time() + seconds)
         j = dict(self.db.one("SELECT * FROM jobs WHERE id=?", (jid,)))
         c = json.loads(j["counters"] or "{}")
-        return {"id": jid, "status": j["status"], "text": j["result"] or "", "seconds": round(time.time() - t0, 1),
+        return {"id": jid, "status": j["status"], "text": j["result"] or "", "error": j["error"] or "", "seconds": round(time.time() - t0, 1),
                 "llm_calls": c.get("llm_calls", 0), "tool_calls": c.get("tool_calls", 0),
                 "verified": c.get("verified"), "seen_urls": c.get("seen_urls", []),
                 "files": c.get("created_files", []),
@@ -210,6 +210,8 @@ def main() -> int:
             rec["answer_excerpt"] = o["text"][:700]
             rec["passed"] = ok
             rec["provider"] = r.llm.last_provider
+            if o["error"]:
+                rec["job_error"] = o["error"][:400]
         except QuotaExhausted as e:
             rec.update({"passed": False, "error": f"cuota: {e}"[:300]})
         except Exception as e:  # noqa: BLE001
@@ -218,7 +220,7 @@ def main() -> int:
         results.append(rec)
         print(f"[{'OK ' if rec['passed'] else 'FAIL'}] {rec['id']} {rec['category']} "
               f"status={rec.get('status')} llm={rec.get('llm_calls')} tools={rec.get('tools')} "
-              f"t={rec.get('seconds')}s {rec.get('error', '')}")
+              f"t={rec.get('seconds')}s {rec.get('error', '')} {rec.get('job_error', '')}")
         print("      respuesta:", (rec.get("answer_excerpt") or "").replace("\n", " ")[:400])
 
     # --- Aprobación real y reanudación (continúa L10) --------------------------------
@@ -271,7 +273,8 @@ def main() -> int:
             fh.write(f"## Evaluación en vivo: {passed}/{len(results)} ({summary['rate']}%)\n\n| id | categoría | ok | llm | herramientas |\n|---|---|---|---|---|\n")
             for x in results:
                 fh.write(f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} | {x.get('llm_calls', '')} | {', '.join(x.get('tools') or [])} |\n")
-    return 0
+    # El job falla si no se alcanza el objetivo: un 0/13 nunca debe verse como éxito.
+    return 0 if summary["rate"] >= 95 else 1
 
 
 if __name__ == "__main__":

@@ -134,7 +134,15 @@ class LLM:
                     self.sleep(2 * (attempt + 1))
                     continue
                 if r.status_code == 200:
-                    data = r.json()
+                    try:
+                        data = r.json()
+                    except ValueError:
+                        all_429 = False
+                        ctype = r.headers.get("Content-Type", "?")
+                        errors.append(f"{p.name}: HTTP 200 sin JSON (Content-Type={ctype}; "
+                                      f"inicio={redact(r.text[:160])!r})")
+                        self._record(p.name, None, error=True)
+                        break
                     try:
                         msg = data["choices"][0]["message"]
                     except (KeyError, IndexError):
