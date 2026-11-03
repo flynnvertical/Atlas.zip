@@ -1,6 +1,8 @@
 # Pruebas y resultados
 
-## 1. Batería determinista — **72/72 superadas (100 %)**, ejecutada el 2026-11-03 17:32 UTC
+## 1. Batería determinista — **74/74 superadas (100 %)**
+Local (contenedor de desarrollo) y **en GitHub Actions** (`flynnvertical/Atlas.zip`, runs
+41694120442 y 41695074464, Ubuntu, Python 3.12): verde, con la prueba de *sandbox sin red* obligatoria en CI.
 Evidencia completa: [`reports/pytest_resultados.txt`](../reports/pytest_resultados.txt).
 Reproducir: `pip install -r requirements-dev.txt && python -m pytest tests -v`.
 
@@ -26,19 +28,27 @@ Reproducir: `pip install -r requirements-dev.txt && python -m pytest tests -v`.
 | Persistencia de tareas | 7 | deduplicación de mensajes, programación diaria con zona horaria, tareas programadas sin duplicar, límites, cancelar/reintentar, detección de escritor concurrente |
 | Costo y recursos | 6 | presupuesto por trabajo nunca excedido, tope diario antes de usar la red, cuota agotada no consume intentos, contabilidad de tokens, tareas simples sin esquemas de herramientas |
 
-## 2. Evaluación en vivo (modelo real + internet real) — **NO EJECUTADA**
+## 2. Evaluación en vivo (modelo real + internet real) — **NO EJECUTADA todavía (falta una clave)**
 `scripts/live_eval.py` define 14 casos reales con criterios fijados de antemano (investigación con
 URL verificada, extracción web, DOCX, XLSX con total correcto, primo 1000 con `run_python`, PDF,
 inyección real alojada en este repo, aprobación + reanudación, honestidad ante datos inexistentes,
-memoria entre sesiones con estado cifrado).
+memoria entre sesiones con estado cifrado). Se suma una prueba de persistencia entre **dos runners
+distintos** a través de la rama git cifrada (`persistencia-1` → `persistencia-2`).
 
-Se intentó ejecutarla en GitHub Actions (único entorno con salida a internet y modelo gratuito):
-**GitHub no inició los trabajos**: *"The job was not started because your account is locked due
-to a billing issue."* (run 41684273609). Este contenedor de desarrollo tiene la red restringida y no
-alcanza a Telegram ni a ningún proveedor de modelos, así que **no hay resultados en vivo** que reportar.
+Historial real del 2026-11-03:
+| Corrida | Resultado | Causa |
+|---|---|---|
+| 41684273609, 41685463295 (intento 1) | No arrancó | *"The job was not started because your account is locked due to a billing issue."* (cuenta `cargazul33`) |
+| 41685463295 (intento 2, ya en `flynnvertical`) | 70 ✔, 1 ✘, 1 omitida | `pandas` faltaba en `requirements.txt`; sandbox sin red no disponible en runners (unshare restringido) → **corregidos** |
+| 41694120442 | Pruebas ✔ · en vivo **0/13** | Todas las llamadas al modelo: `HTTP 200 text/plain "OK"` → **GitHub Models está retirado desde 2026-07-30** |
+| 41695074464 | Pruebas ✔ · en vivo 0/13 (diagnóstico confirmado) | Ídem; el error ahora se informa en vez de ocultarse |
 
-**Para ejecutarla**: resolver la facturación de GitHub y hacer push (el workflow `ci.yml` corre las
-pruebas, la evaluación en vivo y una prueba de persistencia entre dos máquinas distintas), o en una
-PC con red: `GITHUB_MODELS_TOKEN=... python scripts/live_eval.py`.
+Un 0/13 por falta de modelo no mide la calidad del agente: desde esta versión, sin clave el CI
+informa **NO EJECUTADA** (advertencia visible) en lugar de un porcentaje engañoso, y con clave el job
+falla si no alcanza el 95 %.
+
+**Para ejecutarla**: crear una clave gratuita de Groq (console.groq.com → API Keys) y cargarla como
+secreto `GROQ_API_KEY` del repositorio; después, Actions → *CI + evaluación en vivo* → *Re-run*.
+También en una PC con red: `GROQ_API_KEY=... python scripts/live_eval.py`.
 
 Objetivo: ≥ 95 % de éxito. No se asume: el resultado dependerá del modelo gratuito disponible.

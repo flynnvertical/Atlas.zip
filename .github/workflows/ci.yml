@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  models: read   # GitHub Models gratis con GITHUB_TOKEN (cuota limitada)
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -38,30 +37,43 @@ jobs:
         if: always()
         with: {name: pytest, path: reports/pytest.xml, retention-days: 14}
 
+  # GitHub Models fue retirado el 2026-07-30: la evaluación en vivo necesita al menos una clave
+  # de proveedor gratuito como secreto del repo. Sin ella se informa NO EJECUTADA (nunca 0/N falso).
+  proveedor:
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.chk.outputs.ok }}
+    steps:
+      - id: chk
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$GROQ_API_KEY$GEMINI_API_KEY$OPENROUTER_API_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Evaluación en vivo NO EJECUTADA: falta GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY en los secretos del repositorio."
+            echo "## ⚠️ Evaluación en vivo NO EJECUTADA" >> "$GITHUB_STEP_SUMMARY"
+            echo "Falta una clave de proveedor de modelo gratuito en Settings → Secrets → Actions (GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   en-vivo:
-    needs: pruebas
+    needs: [pruebas, proveedor]
+    if: needs.proveedor.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Claves opcionales de respaldo (si las configurás como secretos)
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AGENTE_LLM_DAILY_CAP: "140"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
-      - name: Diagnóstico del endpoint de GitHub Models (sin secretos en la salida)
-        continue-on-error: true
-        run: |
-          curl -sS -o /tmp/resp.txt -w "HTTP %{http_code} | %{content_type}\n" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
-            -H "Accept: application/json" -H "X-GitHub-Api-Version: 2026-03-10" \
-            https://models.github.ai/inference/chat/completions \
-            -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"Decí OK"}],"max_tokens":5}'
-          head -c 400 /tmp/resp.txt; echo
       - name: Evaluación en vivo (modelo real + internet real)
         run: python scripts/live_eval.py --out reports/live_eval.json --only "${{ github.event.inputs.only }}"
       - uses: actions/upload-artifact@v4
@@ -71,12 +83,16 @@ jobs:
   # Persistencia real entre DOS runners distintos usando el mismo mecanismo que el despliegue
   # (estado cifrado en una rama git). Datos de prueba no sensibles; la rama se borra al final.
   persistencia-1:
-    needs: pruebas
+    needs: [pruebas, proveedor]
+    if: needs.proveedor.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions: {contents: write, models: read}
+    permissions: {contents: write}
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # sólo para la rama temporal de estado
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
       AGENTE_DATA_DIR: ${{ github.workspace }}/data
     steps:
@@ -98,9 +114,12 @@ jobs:
     needs: persistencia-1
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions: {contents: write, models: read}
+    permissions: {contents: write}
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # sólo para la rama temporal de estado
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
       AGENTE_DATA_DIR: ${{ github.workspace }}/data
     steps:

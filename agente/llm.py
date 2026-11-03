@@ -1,11 +1,12 @@
 """Cliente LLM agnóstico de proveedor (API compatible con OpenAI Chat Completions).
 
 Proveedores con cuota gratuita soportados (todos opcionales, en cadena de respaldo):
-  github     -> GitHub Models, usa GITHUB_TOKEN (en Actions: permissions: models: read)
   groq       -> GROQ_API_KEY
   gemini     -> GEMINI_API_KEY (endpoint compatible OpenAI de Google AI Studio)
   openrouter -> OPENROUTER_API_KEY (modelos ':free')
   ollama     -> OLLAMA_BASE_URL (local, p. ej. en una PC propia)
+  github     -> NO usar: GitHub Models fue retirado el 2026-07-30 (el endpoint responde "OK" en texto
+                plano). Sólo se activa si se pide explícitamente en AGENTE_LLM_PROVIDERS.
 Ninguno se activa con facturación: si la cuota se agota, el proveedor devuelve 429 y se
 pasa al siguiente; si todos fallan, el trabajo queda en cola para la próxima ejecución.
 """
@@ -47,22 +48,22 @@ def _env(name: str, default: str | None = None) -> str | None:
 
 
 def providers_from_env() -> list[Provider]:
-    order = [x.strip() for x in (_env("AGENTE_LLM_PROVIDERS", "github,groq,gemini,openrouter,ollama") or "").split(",") if x.strip()]
+    order = [x.strip() for x in (_env("AGENTE_LLM_PROVIDERS", "groq,gemini,openrouter,ollama") or "").split(",") if x.strip()]
     out: list[Provider] = []
     for name in order:
-        if name == "github" and (_env("GITHUB_MODELS_TOKEN") or _env("GITHUB_TOKEN")):
+        if name == "github" and _env("GITHUB_MODELS_TOKEN"):  # retirado; sólo opt-in explícito
             out.append(Provider("github", "https://models.github.ai/inference/chat/completions",
                                 _env("GITHUB_MODELS_MODEL", "openai/gpt-4.1-mini"),
-                                _env("GITHUB_MODELS_TOKEN") or _env("GITHUB_TOKEN")))
+                                _env("GITHUB_MODELS_TOKEN")))
         elif name == "groq" and _env("GROQ_API_KEY"):
             out.append(Provider("groq", "https://api.groq.com/openai/v1/chat/completions",
-                                _env("GROQ_MODEL", "llama-3.3-70b-versatile"), _env("GROQ_API_KEY")))
+                                _env("GROQ_MODEL", "openai/gpt-oss-120b"), _env("GROQ_API_KEY")))
         elif name == "gemini" and _env("GEMINI_API_KEY"):
             out.append(Provider("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                                _env("GEMINI_MODEL", "gemini-2.5-flash"), _env("GEMINI_API_KEY")))
+                                _env("GEMINI_MODEL", "gemini-flash-latest"), _env("GEMINI_API_KEY")))
         elif name == "openrouter" and _env("OPENROUTER_API_KEY"):
             out.append(Provider("openrouter", "https://openrouter.ai/api/v1/chat/completions",
-                                _env("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"),
+                                _env("OPENROUTER_MODEL", "openrouter/free"),
                                 _env("OPENROUTER_API_KEY")))
         elif name == "ollama" and _env("OLLAMA_BASE_URL"):
             out.append(Provider("ollama", _env("OLLAMA_BASE_URL").rstrip("/") + "/v1/chat/completions",
@@ -109,7 +110,7 @@ class LLM:
     def chat(self, messages: list[dict], tools: list[dict] | None = None, json_mode: bool = False,
              temperature: float = 0.2) -> dict:
         if not self.providers:
-            raise LLMError("No hay proveedor LLM configurado (ver docs/CONFIGURACION.md).")
+            raise LLMError("No hay proveedor LLM configurado: definí GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY (ver docs/INSTALACION.md).")
         if self.calls_today() >= self.daily_cap:
             raise QuotaExhausted(f"Tope diario propio alcanzado ({self.daily_cap} llamadas).")
         errors: list[str] = []

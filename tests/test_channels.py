@@ -223,3 +223,14 @@ def test_llm_non_json_200_is_reported_not_crash(server, db):
     llm = LLM(db, [Provider("a", s.url + "/v1/chat/completions", "m", None)], sleep=lambda x: None)
     with pytest.raises(LLMError, match="sin JSON"):
         llm.chat([{"role": "user", "content": "x"}])
+
+
+def test_retired_github_models_not_used_by_default(monkeypatch):
+    from agente.llm import providers_from_env
+    for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_BASE_URL",
+              "GITHUB_MODELS_TOKEN", "AGENTE_LLM_PROVIDERS"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghs_" + "x" * 36)  # presente en todo runner de Actions
+    assert providers_from_env() == []  # GitHub Models fue retirado el 2026-07-30
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    assert [p.name for p in providers_from_env()] == ["groq"]

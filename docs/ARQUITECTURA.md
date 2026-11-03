@@ -15,7 +15,7 @@
                               │  5. guarda estado cifrado si cambió           │
                               └──────────┬────────────────────────────────────┘
                                          │ API compatible OpenAI
-                         GitHub Models (GITHUB_TOKEN) → respaldo Groq/Gemini/OpenRouter/Ollama
+                         Groq → respaldo Gemini / OpenRouter / Ollama (claves gratuitas propias)
 ```
 
 ### Módulos (`agente/`)
@@ -48,7 +48,7 @@ la restricción dura de USD 0/mes y administración desde Android.
 | **Deep Agents** | Patrón planificador + subagentes + sistema de archivos. | Patrón adoptado parcialmente (plan + espacio de trabajo); sin subagentes porque multiplican llamadas y la cuota gratuita es el recurso escaso. |
 | **n8n** | Excelente para integraciones, pero autoalojarlo exige servidor; la nube es paga. | No usado. Integrable a futuro vía `http_request` (con aprobación). |
 | **MCP** | Estándar para conectar herramientas. | No es necesario para el MVP (las herramientas son internas). Ver “Próximos pasos”. |
-| **Infraestructura** | GitHub Actions: minutos ilimitados en repos públicos, cron mínimo 5 min con demoras, desactivación tras 60 días sin actividad. Telegram Bot API: gratis. GitHub Models: gratis con límites por modelo. | **Elegido**: es la única combinación que permite ejecución desatendida, persistencia y un LLM sin tarjeta de crédito. |
+| **Infraestructura** | GitHub Actions: minutos ilimitados en repos públicos, cron mínimo 5 min con demoras, desactivación tras 60 días sin actividad. Telegram Bot API: gratis. ~~GitHub Models~~ (retirado 2026-07-30): el modelo gratuito pasa a Groq/Gemini/OpenRouter con clave propia. | **Elegido**: es la única combinación que permite ejecución desatendida, persistencia y un LLM sin tarjeta de crédito. |
 
 **Un solo agente**: con cuotas de ~50–150 pedidos/día, cada subagente adicional reduce la cantidad de
 tareas útiles. El único "especialista" separado es el **auditor**, que sólo corre cuando los controles
@@ -73,7 +73,9 @@ formato pero no el criterio).
 7. **Estado**: cifrado AES-256-GCM autenticado; sin `AGENTE_STATE_KEY` es ilegible aunque el repo sea público.
 
 ## Fuentes consultadas en la investigación
-- GitHub Models, facturación y acceso gratuito con límites: https://docs.github.com/en/billing/concepts/product-billing/github-models
+- **GitHub Models fue retirado el 2026-07-30** (inferencia no disponible para nadie): https://github.blog/changelog/2026-07-30-github-models-is-now-retired/ · aviso previo: https://github.blog/changelog/2026-07-01-github-models-is-being-fully-retired-on-july-30-2026/ · reporte del efecto en un workflow: https://github.com/qte77/gha-ai-changelog/issues/45
+- Comparativas de APIs gratuitas vigentes (oct. 2026): https://openrouter.ai/blog/tutorials/free-llm-apis-compared/ · https://agentdeals.dev/free-llm-apis
+- (Histórico, desactualizado) GitHub Models, facturación: https://docs.github.com/en/billing/concepts/product-billing/github-models
 - Límites de GitHub Models (terceros, no oficiales): https://fast.io/resources/github-models-rate-limit/
 - Permiso `models: read` en Actions (terceros): https://github.com/nsrosenqvist/nitpik/wiki/04-GitHub-Models
 - Cuotas Groq (terceros): https://benchlm.ai/free-tier/groq · https://eesel.ai/blog/groq-pricing
@@ -83,3 +85,11 @@ formato pero no el criterio).
 
 Las cifras de cuotas de terceros no coinciden entre sí: el sistema no depende de ninguna cifra
 concreta. Controla su propio tope diario (`AGENTE_LLM_DAILY_CAP`) y, ante un 429, pausa y reanuda.
+
+## Corrección registrada (2026-11-03)
+La primera versión eligió **GitHub Models** como proveedor por defecto (gratis con `GITHUB_TOKEN`).
+La investigación inicial se apoyó en páginas de terceros desactualizadas y no detectó que el servicio
+había sido **retirado el 2026-07-30**. Se descubrió al ejecutar el CI real: el endpoint respondía
+`HTTP 200 text/plain "OK"` a todo pedido. Corrección: GitHub Models salió de la cadena por defecto
+(sólo se activa con `AGENTE_LLM_PROVIDERS=github` + `GITHUB_MODELS_TOKEN`), el cliente informa
+respuestas no JSON y la evaluación en vivo exige una clave de Groq, Gemini u OpenRouter.

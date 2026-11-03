@@ -5,7 +5,7 @@ calcular, programar, recordar— y te entrega resultados verificados por **Teleg
 operativo de **USD 0** usando cuotas gratuitas.
 
 ```
-Telegram ⇄ agente (plan → herramientas → verificación → entrega) ⇄ modelo gratuito (GitHub Models / Groq / Gemini / OpenRouter / Ollama)
+Telegram ⇄ agente (plan → herramientas → verificación → entrega) ⇄ modelo gratuito (Groq / Gemini / OpenRouter / Ollama)
                           │
                  estado cifrado AES-256-GCM (memoria, trabajos, archivos) en la rama agent-state
 ```

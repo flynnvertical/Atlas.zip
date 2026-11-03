@@ -1,6 +1,6 @@
 """Evaluación EN VIVO: modelo LLM real + internet real. No usa respuestas simuladas.
 
-Uso (requiere un proveedor LLM configurado, p. ej. GITHUB_TOKEN con models:read en Actions):
+Uso (requiere un proveedor LLM configurado: GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY):
     python scripts/live_eval.py --out reports/live_eval.json
 
 Cada caso define sus criterios de éxito ANTES de ejecutarse y se evalúa automáticamente con

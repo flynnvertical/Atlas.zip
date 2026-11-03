@@ -7,9 +7,9 @@
 |---|---|---|
 | Código y librerías | 0 | Software libre (requests, bs4, lxml, pypdf, python-docx, openpyxl, cryptography) |
 | Telegram Bot API | 0 | Límites de envío de Telegram (≈30 msg/s; archivos de bots hasta 50 MB de subida, 20 MB de descarga) |
-| GitHub Actions (opción A) | 0 en repo **público** | Cuenta sin bloqueo de facturación (hoy **bloqueada**). Cron mínimo 5 min y con demoras sin garantía; desactivación tras 60 días sin actividad; logs públicos (el agente sólo imprime métricas). En repo privado: 2.000 min/mes gratis → con cron cada 10 min se excede (≈4.300 min); usar cada 30–60 min |
-| GitHub Models | 0 | Límites por modelo y por cuenta, no publicados de forma estable; fuentes de terceros indican ~50–150 pedidos/día y ~8k tokens de entrada por pedido en el plan gratuito |
-| Groq / Gemini / OpenRouter | 0 (opcionales) | Cuotas diarias variables y cambiantes; Gemini ajustó su plan gratuito en 2026. Ante 429 el agente pasa al siguiente o pausa |
+| GitHub Actions (opción A) | 0 en repo **público** | Funciona en `flynnvertical` (verificado 2026-11-03). Cron mínimo 5 min y con demoras sin garantía; desactivación tras 60 días sin actividad; logs públicos (el agente sólo imprime métricas). En repo privado: 2.000 min/mes gratis → con cron cada 10 min se excede (≈4.300 min); usar cada 30–60 min |
+| ~~GitHub Models~~ | — | **Retirado por GitHub el 2026-07-30**; no usar |
+| Groq / Gemini / OpenRouter | 0 (al menos uno obligatorio) | Cuotas diarias variables y cambiantes; Gemini ajustó su plan gratuito en 2026. Ante 429 el agente pasa al siguiente o pausa |
 | Render (opción B) | 0 | 750 h/mes por espacio de trabajo, se duerme a los 15 min, ~1 min para despertar, disco efímero, puede reiniciarse en cualquier momento |
 | Termux (opción C) | 0 | Batería y datos móviles propios; sólo funciona con el teléfono encendido |
 
@@ -21,7 +21,7 @@
 | Tope duro por trabajo | 14 (`AGENTE_MAX_LLM_CALLS`) |
 | Tope diario propio | 120 (`AGENTE_LLM_DAILY_CAP`) |
 
-Con ~150 pedidos/día gratuitos ⇒ **≈ 15–40 tareas por día**. Para más capacidad sin pagar: agregar
+Con ~1.000 pedidos/día (Groq, según fuentes de terceros que no coinciden) o 50/día (OpenRouter sin crédito) ⇒ entre **≈ 6 y 100+ tareas por día** según el proveedor. Medilo con `/uso`. Para más capacidad sin pagar: agregar
 proveedores de respaldo (cada uno suma su cuota) o un modelo local con Ollama en una PC propia.
 `/uso` muestra el consumo real por día y proveedor.
 

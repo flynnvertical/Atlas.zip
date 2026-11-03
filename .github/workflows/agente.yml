@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: write   # guardar el estado cifrado en la rama agent-state
-  models: read      # GitHub Models (gratis, con cuota)
   actions: write    # mantener el workflow habilitado
 
 concurrency:
@@ -38,8 +37,8 @@ jobs:
       - name: Verificar secretos obligatorios
         id: cfg
         run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$AGENTE_STATE_KEY" ]; then
-            echo "::notice::Faltan TELEGRAM_BOT_TOKEN o AGENTE_STATE_KEY. Ver docs/INSTALACION.md"
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$AGENTE_STATE_KEY" ] || [ -z "$GROQ_API_KEY$GEMINI_API_KEY$OPENROUTER_API_KEY" ]; then
+            echo "::notice::Faltan TELEGRAM_BOT_TOKEN, AGENTE_STATE_KEY o una clave de modelo (GROQ/GEMINI/OPENROUTER). Ver docs/INSTALACION.md"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"

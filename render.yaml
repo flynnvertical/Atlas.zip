@@ -25,7 +25,7 @@ services:
         sync: false
       - key: AGENTE_STATE_GH_TOKEN
         sync: false
-      - key: GITHUB_MODELS_TOKEN
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
