@@ -21,11 +21,19 @@ cargá el nuevo directamente como secreto.
 ## Paso 1 — Proveedor de modelo (al menos uno, gratis)
 | Proveedor | Cómo obtenerlo | Variable |
 |---|---|---|
-| Groq (recomendado) | console.groq.com → API Keys | `GROQ_API_KEY` |
-| Gemini (respaldo) | aistudio.google.com → Get API key (sin activar facturación) | `GEMINI_API_KEY` |
-| OpenRouter (respaldo) | openrouter.ai → Keys (modelos `:free`) | `OPENROUTER_API_KEY` |
+| Orden | Motor | Cómo obtenerlo (sin tarjeta) | Secreto |
+|---|---|---|---|
+| 1 | Groq (primario; 3 modelos con cuota propia) | console.groq.com → API Keys | `GROQ_API_KEY` |
+| 2 | OpenRouter (respaldo; modelos `:free`) | openrouter.ai → Keys. **No comprar créditos** (regla USD 0): sin compra el límite es 50 pedidos/día y 20/min | `OPENROUTER_API_KEY` |
+| 3 | Gemini (respaldo) | aistudio.google.com → Get API key, sin activar facturación | `GEMINI_API_KEY` |
+| 4 | Mistral (respaldo) | console.mistral.ai → API Keys, modo gratuito | `MISTRAL_API_KEY` |
+| — | ~~Cerebras~~ | Descartado: desde 2026 su prueba exige cargar un medio de pago | — |
 
-Si configurás varios, se usan en cadena: ante una cuota agotada (HTTP 429) pasa al siguiente.
+**Conmutación automática**: ante un 429 o cuota agotada, el motor queda "en enfriamiento" el tiempo
+que indicó (`Retry-After`) —guardado en el estado, así también lo respetan las próximas corridas— y el
+pedido pasa en el acto al siguiente motor configurado. Sólo se espera en el mismo motor si el límite
+vence en segundos (para no gastar los 50 pedidos diarios de OpenRouter por un límite por minuto). Cada
+respuesta en Telegram termina con `⚙️ Motor: …` indicando qué motor respondió.
 
 > **GitHub Models ya no sirve**: GitHub lo retiró el 2026-07-30 (su endpoint responde `OK` en
 > texto plano). Por eso hace falta al menos una clave propia gratuita. Cargala como secreto del repo

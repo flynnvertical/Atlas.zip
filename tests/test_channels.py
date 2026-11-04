@@ -349,5 +349,5 @@ def test_mixed_429_and_dead_model_pauses_instead_of_failing(server, db):
     for _ in range(2):
         with pytest.raises(QuotaExhausted) as e:
             llm.chat([{"role": "user", "content": "x"}])
-        assert e.value.retry_after == 90
+        assert e.value.retry_after == pytest.approx(90, abs=2)
     assert len(b_calls) == 1  # el modelo inexistente no se vuelve a consultar

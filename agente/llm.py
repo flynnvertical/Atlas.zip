@@ -3,7 +3,9 @@
 Proveedores con cuota gratuita soportados (todos opcionales, en cadena de respaldo):
   groq       -> GROQ_API_KEY
   gemini     -> GEMINI_API_KEY (endpoint compatible OpenAI de Google AI Studio)
-  openrouter -> OPENROUTER_API_KEY (modelos ':free')
+  openrouter -> OPENROUTER_API_KEY (modelos ':free'; sin comprar créditos: 50 pedidos/día, 20/min)
+  mistral    -> MISTRAL_API_KEY (modo gratuito, sin tarjeta)
+  (Cerebras se evaluó y se descartó: desde 2026 su prueba gratuita exige cargar un medio de pago.)
   ollama     -> OLLAMA_BASE_URL (local, p. ej. en una PC propia)
   github     -> NO usar: GitHub Models fue retirado el 2026-07-30 (el endpoint responde "OK" en texto
                 plano). Sólo se activa si se pide explícitamente en AGENTE_LLM_PROVIDERS.
@@ -45,10 +47,20 @@ _RA_RX = re.compile(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.I)
 
 def retry_after_seconds(r) -> float | None:
     """Lee Retry-After (cabecera) o el texto 'try again in 1m2.5s' que usan Groq/OpenAI."""
-    h = r.headers.get("retry-after") if hasattr(r, "headers") else None
+    hdrs = r.headers if hasattr(r, "headers") else {}
+    h = hdrs.get("retry-after")
     if h:
         try:
             return max(0.0, float(h))
+        except ValueError:
+            pass
+    reset = hdrs.get("x-ratelimit-reset")  # OpenRouter: instante de reinicio en ms desde epoch
+    if reset:
+        try:
+            v = float(reset)
+            v = v / 1000 if v > 1e11 else v
+            if v > 1e9:
+                return max(0.0, v - time.time())
         except ValueError:
             pass
     m = _RA_RX.search(getattr(r, "text", "") or "")
@@ -76,7 +88,7 @@ GROQ_DEFAULT_MODELS = "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-os
 
 
 def providers_from_env() -> list[Provider]:
-    order = [x.strip() for x in (_env("AGENTE_LLM_PROVIDERS", "groq,gemini,openrouter,ollama") or "").split(",") if x.strip()]
+    order = [x.strip() for x in (_env("AGENTE_LLM_PROVIDERS", "groq,openrouter,gemini,mistral,ollama") or "").split(",") if x.strip()]
     out: list[Provider] = []
     for name in order:
         if name == "github" and _env("GITHUB_MODELS_TOKEN"):  # retirado; sólo opt-in explícito
@@ -96,6 +108,9 @@ def providers_from_env() -> list[Provider]:
             out.append(Provider("openrouter", "https://openrouter.ai/api/v1/chat/completions",
                                 _env("OPENROUTER_MODEL", "openrouter/free"),
                                 _env("OPENROUTER_API_KEY")))
+        elif name == "mistral" and _env("MISTRAL_API_KEY"):
+            out.append(Provider("mistral", "https://api.mistral.ai/v1/chat/completions",
+                                _env("MISTRAL_MODEL", "mistral-small-latest"), _env("MISTRAL_API_KEY")))
         elif name == "ollama" and _env("OLLAMA_BASE_URL"):
             out.append(Provider("ollama", _env("OLLAMA_BASE_URL").rstrip("/") + "/v1/chat/completions",
                                 _env("OLLAMA_MODEL", "qwen2.5:7b"), None))
@@ -115,6 +130,28 @@ class LLM:
         self.max_inline_wait = max_inline_wait  # espera corta ante límites por minuto
         self.last_provider: str | None = None
         self.dead: set[str] = set()  # modelos inexistentes/retirados: no se reintentan en este proceso
+        self._cool: dict[str, float] = {}  # enfriamiento por motor tras un 429 (también persistido en DB)
+        self.short_wait = 8.0  # sólo se espera en el mismo motor si el límite vence en segundos
+
+    # -- enfriamiento por motor -----------------------------------------------------
+    def cooldown_until(self, name: str) -> float:
+        until = self._cool.get(name, 0.0)
+        if self.db:
+            try:
+                until = max(until, float(self.db.kv_get(f"cooldown:{name}", "0") or 0))
+            except ValueError:
+                pass
+        return until
+
+    def _set_cooldown(self, name: str, seconds: float) -> None:
+        until = time.time() + max(1.0, seconds)
+        self._cool[name] = until
+        if self.db:
+            self.db.kv_set(f"cooldown:{name}", str(until))
+
+    def available(self) -> list[Provider]:
+        now = time.time()
+        return [p for p in self.providers if p.name not in self.dead and self.cooldown_until(p.name) <= now]
 
     # -- contabilidad de uso ---------------------------------------------------
     def _today(self) -> str:
@@ -149,13 +186,22 @@ class LLM:
         errors: list[str] = []
         all_429 = True
         waits: list[float] = []
-        for p in self.providers:
-            if p.name in self.dead:
-                continue
+        avail = self.available()
+        if not avail:
+            live = [p for p in self.providers if p.name not in self.dead]
+            if not live:
+                raise LLMError("Ningún motor disponible (modelos inexistentes o mal configurados).")
+            wait = min(self.cooldown_until(p.name) for p in live) - time.time()
+            raise QuotaExhausted("Todos los motores están en espera por cuota (429).", retry_after=max(1.0, wait))
+        for idx, p in enumerate(avail):
+            others_left = idx < len(avail) - 1
             body: dict[str, Any] = {"model": p.model, "messages": messages, "temperature": temperature}
             if tools:
                 body["tools"] = tools
                 body["tool_choice"] = "auto"
+                if p.name.startswith("openrouter"):
+                    # Sólo enrutar a modelos gratuitos que soporten herramientas.
+                    body["provider"] = {"require_parameters": True}
             if json_mode:
                 body["response_format"] = {"type": "json_object"}
             headers = {"Content-Type": "application/json"}
@@ -195,11 +241,16 @@ class LLM:
                 errors.append(f"{p.name}: HTTP {r.status_code} {detail}")
                 if r.status_code == 429:
                     ra = retry_after_seconds(r)
-                    if ra is not None and ra <= self.max_inline_wait and attempt == 0:
-                        self.sleep(ra + 0.5)  # límite por minuto: esperar lo indicado y reintentar
+                    # Con otro motor disponible se conmuta enseguida (salvo esperas de segundos);
+                    # si es el último, se espera hasta max_inline_wait.
+                    limit = self.short_wait if others_left else self.max_inline_wait
+                    if ra is not None and ra <= limit and attempt == 0:
+                        self.sleep(ra + 0.5)
                         continue
-                    waits.append(ra if ra is not None else 300.0)
-                    break  # cuota: pasar al siguiente proveedor
+                    wait = ra if ra is not None else 300.0
+                    self._set_cooldown(p.name, wait)
+                    waits.append(wait)
+                    break  # cuota: conmutar al siguiente motor
                 all_429 = False
                 if r.status_code in (500, 502, 503, 504):
                     self.sleep(3 * (attempt + 1))
@@ -211,6 +262,8 @@ class LLM:
                     continue
                 if r.status_code == 404 or "model_not_found" in r.text or "decommissioned" in r.text:
                     self.dead.add(p.name)
+                if r.status_code == 402:  # OpenRouter: saldo negativo o sin crédito -> fuera por 1 h
+                    self._set_cooldown(p.name, 3600)
                 break  # 401/403/404/400: error de configuración, siguiente proveedor
         if all_429 or waits:
             # Si algún proveedor sólo está limitado por cuota, conviene esperar y no gastar intentos.

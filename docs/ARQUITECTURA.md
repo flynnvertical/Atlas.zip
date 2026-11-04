@@ -111,3 +111,20 @@ respuestas no JSON y la evaluación en vivo exige una clave de Groq, Gemini u Op
   deduplicación y sincronizado al estado cifrado apenas se recibe. Riesgo residual: en un host con
   disco efímero (Render) un reemplazo del contenedor en los segundos entre la recepción y la subida
   del estado puede perder ese mensaje.
+
+## Segundo motor con conmutación automática (2026-11-04, pedido de Mariano)
+Motivo: la evaluación en vivo se abortó por la cuota diaria gratuita de Groq; no se puede depender de
+un solo proveedor. Cadena por defecto: **Groq → OpenRouter → Gemini → Mistral** (se usan los que
+tengan clave). Evaluación de alternativas (USD 0, sin tarjeta):
+- **OpenRouter** `:free` — elegido como secundario. Límite sin compra: 50 pedidos/día y 20/min; se
+  pide `provider.require_parameters=true` para que sólo enrute a modelos gratuitos con herramientas.
+  Fuentes: https://openrouter.zendesk.com/hc/en-us/articles/39501163636379-OpenRouter-Rate-Limits-What-You-Need-to-Know · https://costgoat.com/pricing/openrouter-free-models
+- **Cerebras** — descartado: el nivel gratuito sin tarjeta fue reemplazado por un crédito de prueba que
+  exige medio de pago. Fuentes: https://toolfreebie.com/cerebras-free-api/ · https://benchlm.ai/free-tier/cerebras
+- **Gemini** (AI Studio) y **Mistral** ("Free mode", claves sin tarjeta) — soportados como respaldos
+  adicionales; límites no publicados de forma estable. Fuentes: https://www.aifreeapi.com/en/posts/mistral-api-free-tier · https://geotoolbox.ai/blog/gemini-api-pricing.md
+
+Mecanismo (`agente/llm.py`): enfriamiento por motor persistido en el estado (`cooldown:<motor>`),
+conmutación inmediata ante 429/402, espera en el mismo motor sólo si el límite vence en ≤ 8 s, y
+registro por trabajo de qué motor respondió (`counters.motores`, pie `⚙️ Motor:` y columna en la
+evaluación en vivo). Pruebas: `tests/test_fallback.py`.

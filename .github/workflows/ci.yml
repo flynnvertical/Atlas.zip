@@ -49,14 +49,22 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
         run: |
-          if [ -n "$GROQ_API_KEY$GEMINI_API_KEY$OPENROUTER_API_KEY" ]; then
+          # Lista los motores configurados (sólo nombres, nunca valores).
+          for k in GROQ_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY MISTRAL_API_KEY; do
+            if [ -n "${!k}" ]; then echo "motor configurado: $k"; else echo "motor NO configurado: $k"; fi
+          done
+          if [ -z "$OPENROUTER_API_KEY$GEMINI_API_KEY$MISTRAL_API_KEY" ]; then
+            echo "::warning::Sin motor de respaldo: sólo Groq. Cargá OPENROUTER_API_KEY (o GEMINI/MISTRAL) para el fallback automático."
+          fi
+          if [ -n "$GROQ_API_KEY$GEMINI_API_KEY$OPENROUTER_API_KEY$MISTRAL_API_KEY" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Evaluación en vivo NO EJECUTADA: falta GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY en los secretos del repositorio."
+            echo "::warning::Evaluación en vivo NO EJECUTADA: falta GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY o MISTRAL_API_KEY en los secretos del repositorio."
             echo "## ⚠️ Evaluación en vivo NO EJECUTADA" >> "$GITHUB_STEP_SUMMARY"
-            echo "Falta una clave de proveedor de modelo gratuito en Settings → Secrets → Actions (GROQ_API_KEY, GEMINI_API_KEY u OPENROUTER_API_KEY)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Falta una clave de motor gratuito en Settings → Secrets → Actions (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY o MISTRAL_API_KEY)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # Verifica el token del bot con getMe (no lee ni consume mensajes; imprime sólo el @usuario).
@@ -88,6 +96,7 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       AGENTE_LLM_DAILY_CAP: "140"
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +122,7 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
       AGENTE_DATA_DIR: ${{ github.workspace }}/data
     steps:
@@ -143,6 +153,7 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
       AGENTE_DATA_DIR: ${{ github.workspace }}/data
     steps:

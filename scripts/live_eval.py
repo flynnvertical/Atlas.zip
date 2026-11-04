@@ -84,6 +84,7 @@ class Runner:
         return {"id": jid, "status": j["status"], "text": j["result"] or "", "error": j["error"] or "", "seconds": round(time.time() - t0, 1),
                 "llm_calls": c.get("llm_calls", 0), "tool_calls": c.get("tool_calls", 0),
                 "verified": c.get("verified"), "seen_urls": c.get("seen_urls", []),
+                "motores": c.get("motores", {}),
                 "files": c.get("created_files", []),
                 "ws": self.s.workspace_dir / f"trabajo_{jid}",
                 "tools": [r["tool"] for r in self.db.all("SELECT tool FROM action_log WHERE job_id=?", (jid,))]}
@@ -229,6 +230,7 @@ def main() -> int:
             rec["answer_excerpt"] = o["text"][:700]
             rec["passed"] = ok
             rec["provider"] = r.llm.last_provider
+            rec["motores"] = o["motores"]
             if o["error"]:
                 rec["job_error"] = o["error"][:400]
         except QuotaExhausted as e:
@@ -239,7 +241,7 @@ def main() -> int:
         results.append(rec)
         print(f"[{'OK ' if rec['passed'] else 'FAIL'}] {rec['id']} {rec['category']} "
               f"status={rec.get('status')} llm={rec.get('llm_calls')} tools={rec.get('tools')} "
-              f"t={rec.get('seconds')}s {rec.get('error', '')} {rec.get('job_error', '')}")
+              f"t={rec.get('seconds')}s motores={rec.get('motores')} {rec.get('error', '')} {rec.get('job_error', '')}")
         print("      respuesta:", (rec.get("answer_excerpt") or "").replace("\n", " ")[:400])
 
     # --- Aprobación real y reanudación (continúa L10) --------------------------------
@@ -286,6 +288,12 @@ def main() -> int:
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=str))
+    totals: dict = {}
+    for x in results:
+        for k, v in (x.get("motores") or {}).items():
+            totals[k] = totals.get(k, 0) + v
+    summary["motores_total"] = totals
+    print("Motores usados en la evaluación:", totals, flush=True)
     if aborted:
         summary["aborted"] = aborted
     print(f"\nRESULTADO EN VIVO: {passed}/{len(results)} ({summary['rate']}%)" + (f" — {aborted}" if aborted else ""))
@@ -293,9 +301,9 @@ def main() -> int:
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
             if aborted:
                 fh.write(f"> ⚠️ {aborted}\n\n")
-            fh.write(f"## Evaluación en vivo: {passed}/{len(results)} ({summary['rate']}%)\n\n| id | categoría | ok | llm | herramientas |\n|---|---|---|---|---|\n")
+            fh.write(f"## Evaluación en vivo: {passed}/{len(results)} ({summary['rate']}%)\n\n| id | categoría | ok | llm | motores | herramientas |\n|---|---|---|---|---|---|\n")
             for x in results:
-                fh.write(f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} | {x.get('llm_calls', '')} | {', '.join(x.get('tools') or [])} |\n")
+                fh.write(f"| {x['id']} | {x['category']} | {'✅' if x['passed'] else '❌'} | {x.get('llm_calls', '')} | {', '.join(f"{k.split(':')[0]}×{v}" for k, v in (x.get('motores') or {}).items())} | {', '.join(x.get('tools') or [])} |\n")
     # El job falla si no se alcanza el objetivo: un 0/13 nunca debe verse como éxito.
     return 0 if summary["rate"] >= 95 else 1
 

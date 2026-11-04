@@ -9,7 +9,10 @@
 | Telegram Bot API | 0 | Límites de envío de Telegram (≈30 msg/s; archivos de bots hasta 50 MB de subida, 20 MB de descarga) |
 | GitHub Actions (opción A) | 0 en repo **público** | Funciona en `flynnvertical` (verificado 2026-11-03). Cron mínimo 5 min y con demoras sin garantía; desactivación tras 60 días sin actividad; logs públicos (el agente sólo imprime métricas). En repo privado: 2.000 min/mes gratis → con cron cada 10 min se excede (≈4.300 min); usar cada 30–60 min |
 | ~~GitHub Models~~ | — | **Retirado por GitHub el 2026-07-30**; no usar |
-| Groq / Gemini / OpenRouter | 0 (al menos uno obligatorio) | Cuotas diarias variables y cambiantes; Gemini ajustó su plan gratuito en 2026. Ante 429 el agente pasa al siguiente o pausa |
+| Groq (primario) | 0 | Por modelo: ~8.000 tokens/min y cupo diario de tokens en ventana móvil de 24 h (medido: ~2–3 evaluaciones completas por día) |
+| OpenRouter `:free` (respaldo) | 0 **sin comprar créditos** | 50 pedidos/día y 20/min (con compra de USD 10 sube a 1.000/día: **no permitido** por la regla USD 0) |
+| Gemini / Mistral (respaldo) | 0 | Límites por proyecto/organización, no publicados de forma estable; ver la consola de cada uno |
+| ~~Cerebras~~ | — | Descartado: la prueba gratuita exige medio de pago |
 | Render (opción B) | 0 | 750 h/mes por espacio de trabajo, se duerme a los 15 min, ~1 min para despertar, disco efímero, puede reiniciarse en cualquier momento |
 | Termux (opción C) | 0 | Batería y datos móviles propios; sólo funciona con el teléfono encendido |
 

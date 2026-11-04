@@ -172,7 +172,14 @@ class Agent:
                 counters["llm_calls"] += 1
                 raise
             counters["llm_calls"] += 1
+            note_engine()
             return msg
+
+        def note_engine():
+            """Registra qué motor respondió (visible en el resultado y en la evaluación en vivo)."""
+            eng = getattr(self.llm, "last_provider", None) or "?"
+            m = counters.setdefault("motores", {})
+            m[eng] = m.get(eng, 0) + 1
 
         messages: list[dict] = json.loads(job.get("messages") or "[]")
         try:
@@ -181,6 +188,7 @@ class Agent:
             if plan is None:
                 plan = self._plan(job["objective"])
                 counters["llm_calls"] += 1
+                note_engine()
                 self._save(job_id, plan=json.dumps(plan, ensure_ascii=False), counters=json.dumps(counters))
                 self.db.log("info", "plan", {"complejidad": plan.get("complejidad"),
                                              "n_criterios": len(plan["criterios_exito"])}, job_id)
@@ -356,6 +364,9 @@ class Agent:
             try:
                 ok, probs = audit(self.llm, job["objective"], plan.get("criterios_exito", []), answer, evidence)
                 counters["llm_calls"] += 1
+                m = counters.setdefault("motores", {})
+                eng = getattr(self.llm, "last_provider", None) or "?"
+                m[eng] = m.get(eng, 0) + 1
                 v.auditor = "aprobó" if ok else "objetó"
                 v.checks.append("auditor independiente")
                 if not ok:
@@ -389,7 +400,9 @@ class Agent:
         if partial:
             verification.passed = False
             verification.issues.insert(0, f"Resultado PARCIAL: {partial}.")
-        text = redact(answer.strip()) + "\n\n" + verification.footer()
+        motores = counters.get("motores") or {}
+        engines = ", ".join(f"{k.split(':')[0]}×{v}" for k, v in sorted(motores.items(), key=lambda kv: -kv[1]))
+        text = redact(answer.strip()) + "\n\n" + verification.footer() + (f"\n⚙️ Motor: {engines}" if engines else "")
         files = [f for f in ctx.created_files if (ctx.workspace / f).exists()]
         counters["verified"] = verification.passed
         checkpoint("done", result=text, lease_until=0)
