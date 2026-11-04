@@ -1,0 +1,9 @@
+# Dependencias mínimas: todas software libre, sin costo.
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+pypdf>=4.0
+python-docx>=1.1
+openpyxl>=3.1
+cryptography>=42
+pandas>=2.2           # disponible para run_python (análisis de datos)

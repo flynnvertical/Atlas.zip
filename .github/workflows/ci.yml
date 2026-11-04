@@ -1,0 +1,180 @@
+name: CI + evaluación en vivo
+
+on:
+  push:
+    branches-ignore: [agent-state]
+    paths: ["agente/**", "tests/**", "scripts/**", "requirements*.txt", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "IDs de casos en vivo a correr (ej. L03,L07). Vacío = todos"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements-dev.txt
+      - name: Pruebas deterministas
+        env:
+          AGENTE_REQUIRE_ISOLATION: "1"   # en CI el sandbox sin red es obligatorio, no opcional
+        run: python -m pytest tests -q -rs --junitxml=reports/pytest.xml
+      - name: Diagnóstico de aislamiento
+        run: python -m agente doctor
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: pytest, path: reports/pytest.xml, retention-days: 14}
+
+  # GitHub Models fue retirado el 2026-07-30: la evaluación en vivo necesita al menos una clave
+  # de proveedor gratuito como secreto del repo. Sin ella se informa NO EJECUTADA (nunca 0/N falso).
+  proveedor:
+    runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.chk.outputs.ok }}
+    steps:
+      - id: chk
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        run: |
+          # Lista los motores configurados (sólo nombres, nunca valores).
+          for k in GROQ_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY MISTRAL_API_KEY; do
+            if [ -n "${!k}" ]; then echo "motor configurado: $k"; else echo "motor NO configurado: $k"; fi
+          done
+          if [ -z "$OPENROUTER_API_KEY$GEMINI_API_KEY$MISTRAL_API_KEY" ]; then
+            echo "::warning::Sin motor de respaldo: sólo Groq. Cargá OPENROUTER_API_KEY (o GEMINI/MISTRAL) para el fallback automático."
+          fi
+          if [ -n "$GROQ_API_KEY$GEMINI_API_KEY$OPENROUTER_API_KEY$MISTRAL_API_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Evaluación en vivo NO EJECUTADA: falta GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY o MISTRAL_API_KEY en los secretos del repositorio."
+            echo "## ⚠️ Evaluación en vivo NO EJECUTADA" >> "$GITHUB_STEP_SUMMARY"
+            echo "Falta una clave de motor gratuito en Settings → Secrets → Actions (GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY o MISTRAL_API_KEY)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Verifica el token del bot con getMe (no lee ni consume mensajes; imprime sólo el @usuario).
+  telegram:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Token de Telegram válido
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::warning::Secreto TELEGRAM_BOT_TOKEN no configurado"; exit 0
+          fi
+          python -m agente doctor --online | tee /tmp/doctor.json
+          grep -q '"telegram_bot": "@' /tmp/doctor.json
+
+  en-vivo:
+    needs: [pruebas, proveedor]
+    if: needs.proveedor.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      AGENTE_LLM_DAILY_CAP: "140"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Evaluación en vivo (modelo real + internet real)
+        run: python -u scripts/live_eval.py --out reports/live_eval.json --only "${{ github.event.inputs.only }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: live-eval, path: reports/live_eval.json, retention-days: 30}
+
+  # Persistencia real entre DOS runners distintos usando el mismo mecanismo que el despliegue
+  # (estado cifrado en una rama git). Datos de prueba no sensibles; la rama se borra al final.
+  persistencia-1:
+    needs: [pruebas, proveedor, en-vivo]   # en serie: comparten la cuota por minuto del proveedor
+    if: always() && needs.pruebas.result == 'success' && needs.proveedor.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # sólo para la rama temporal de estado
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
+      AGENTE_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Sesión 1 — enseñar un dato
+        run: |
+          python -m agente ask "Guardá en tu memoria: mi empresa se llama Electro Sur SRL y vende cables en Mendoza."
+          # La afirmación "lo guardé" no alcanza: se comprueba que la memoria realmente exista.
+          python -c "import os,sys; from agente.db import DB; from agente.memory import Memory; m=Memory(DB(os.environ['AGENTE_DATA_DIR']+'/agente.db')).search('Electro Sur'); print('memorias encontradas:', len(m)); sys.exit(0 if m else 1)"
+      - name: Guardar estado cifrado en rama temporal
+        run: |
+          python -m agente state pack data /tmp/estado/estado.enc
+          cd /tmp/estado && git init -q -b ci-state && git add estado.enc
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "estado ci"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "ci-state:ci-state-${{ github.run_id }}"
+
+  persistencia-2:
+    needs: persistencia-1
+    if: always() && needs.persistencia-1.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # sólo para la rama temporal de estado
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      AGENTE_STATE_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-clave-de-prueba
+      AGENTE_DATA_DIR: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Sesión 2 (otra máquina) — restaurar y recordar
+        run: |
+          git fetch --depth=1 origin "ci-state-${{ github.run_id }}"
+          git show FETCH_HEAD:estado.enc > /tmp/estado.enc
+          python -m agente state unpack /tmp/estado.enc data
+          python -m agente ask "¿Cómo se llama mi empresa y qué vende? Respondé en una línea." | tee /tmp/salida.txt
+          # Exige que lo diga y que la respuesta haya pasado la verificación (normaliza espacios Unicode).
+          python - <<'PY'
+          import re, sys
+          t = re.sub(r"[\u00a0\u2007\u2009\u202f]", " ", open("/tmp/salida.txt", encoding="utf-8").read()).lower()
+          ok = "electro sur" in t and "verificación superada" in t and "no superada" not in t
+          print("PERSISTENCIA OK: recordó el dato en otra máquina" if ok else "PERSISTENCIA FALLÓ")
+          sys.exit(0 if ok else 1)
+          PY
+      - name: Borrar rama temporal
+        if: always()
+        run: git push -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" --delete "ci-state-${{ github.run_id }}" || true
