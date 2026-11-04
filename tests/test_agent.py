@@ -106,7 +106,7 @@ def test_quota_exhausted_requeues_without_consuming_attempt(settings, db):
     st = app.process_jobs(time.time() + 30)
     j = db.one("SELECT * FROM jobs WHERE id=?", (jid,))
     assert st["quota"] and j["status"] == "queued" and j["attempts"] == 0
-    assert "Cuota gratuita" in "\n".join(r["text"] for r in db.all("SELECT text FROM outbox"))
+    assert "sin cuota por ahora" in "\n".join(r["text"] for r in db.all("SELECT text FROM outbox"))
 
 
 def test_side_effect_requires_approval_and_executes_once(settings, db, messenger):
