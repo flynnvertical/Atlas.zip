@@ -1,4 +1,4 @@
-# Registro de estado — 2026-11-03
+# Registro de estado — 2026-11-04
 
 ## Funciona y está comprobado (con evidencia en esta sesión)
 | Capacidad | Evidencia |
@@ -14,22 +14,23 @@
 | Total | **74/74 pruebas deterministas**, local y en GitHub Actions — `reports/pytest_resultados.txt` |
 | CI en GitHub Actions (`flynnvertical`) | Corridas 41694120442 / 41695074464: job `pruebas` verde |
 | Sandbox sin red también en runners de GitHub (`sudo unshare -n` + `setpriv`) | prueba obligatoria en CI, verde |
+| **Evaluación en vivo con modelo real: 14/14 (100 %)** | run 41758915072 — `docs/PRUEBAS.md` |
+| Conmutación automática Groq → OpenRouter ante cuota agotada | misma corrida: 9 llamadas Groq + 32 OpenRouter |
+| Memoria entre dos máquinas (estado cifrado vía git) | `persistencia-1/2` ✔ en la misma corrida |
+| Bot de Telegram con token válido | `@AgenteSupremoflynn_bot` (`getMe` en CI) |
 
 ## Construido pero NO comprobado en vivo
 | Qué | Por qué | Qué hace falta |
 |---|---|---|
-| Calidad de las respuestas con un modelo real | GitHub Models (proveedor elegido al inicio) fue **retirado el 2026-07-30**; no hay otra clave configurada | Secreto `GROQ_API_KEY` (gratis) y re-ejecutar el CI |
-| Bot real de Telegram | No existe todavía un token de bot (debe crearlo el dueño con @BotFather) | Paso 0 de `docs/INSTALACION.md` |
+| Bot respondiendo en Telegram | El cron sólo corre desde la rama por defecto | `main` como rama por defecto y `/vincular <código>` |
 | Ejecución desatendida 24/7 | No desplegado: falta bot de Telegram, clave de modelo y merge | Opción A, B o C de `docs/INSTALACION.md` |
 | Workflow `agente.yml` (estado en rama `agent-state`) | Los cron sólo corren desde la rama por defecto (hoy `claude/instalarlo-3wdb8j`) | Merge a `main` + `main` como rama por defecto |
-| Persistencia entre dos runners (CI `persistencia-1/2`) | Necesita un modelo para la sesión de prueba | `GROQ_API_KEY` |
 | Búsqueda DuckDuckGo desde servidores | Puede ser bloqueada en IPs de nube | Medir en vivo; SearXNG/Brave como alternativa |
 | Instalación en Termux | No hay dispositivo Android en la sesión | Probar `scripts/termux_instalar.sh` |
 
 **No se afirma que el sistema funcione 24/7**: no se pudo comprobar ninguna ejecución desatendida.
 
 ## Faltan (próximas etapas, por utilidad)
-1. Ejecutar la evaluación en vivo y corregir según sus fallas (prioridad máxima).
 2. Navegador con JavaScript (Playwright) para sitios dinámicos y portales de compras públicas.
 3. Módulo licitaciones: conectores a portales oficiales (p. ej. COMPR.AR, Mercado Público) y plantilla de cotización auditable.
 4. OCR para PDF escaneados.
