@@ -1,10 +1,11 @@
 name: Agente (Telegram, ejecución programada)
 
-# Los cron de GitHub sólo corren desde la rama por defecto. Intervalo mínimo 5 min; GitHub puede
+# Los cron de GitHub sólo corren desde la rama por defecto. Intervalo: cada 5 min (el mínimo de
+# GitHub; repo público = minutos gratis); la concurrencia "agente-estado" evita solapamientos. GitHub puede
 # demorarlos (sin garantía de horario) y los desactiva tras 60 días sin actividad en el repo.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [telegram]
@@ -24,7 +25,6 @@ jobs:
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
-      AGENTE_PAIRING_CODE: ${{ secrets.AGENTE_PAIRING_CODE }}
       AGENTE_STATE_KEY: ${{ secrets.AGENTE_STATE_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}

@@ -351,3 +351,36 @@ def test_mixed_429_and_dead_model_pauses_instead_of_failing(server, db):
             llm.chat([{"role": "user", "content": "x"}])
         assert e.value.retry_after == pytest.approx(90, abs=2)
     assert len(b_calls) == 1  # el modelo inexistente no se vuelve a consultar
+
+
+# --- contador "sent" del registro de corridas (defecto real del 2026-11-04) --------
+def test_run_report_counts_all_sends_in_the_pass(settings, db):
+    """Antes "sent" sólo sumaba la última tanda: las respuestas a comandos y los resultados de
+    trabajos salían en tandas anteriores y el registro mostraba 0, lo que llevó a un diagnóstico
+    erróneo. Ahora se cuentan todas las tandas de la pasada."""
+    from agente.llm import ScriptedLLM
+    plan_simple = json.dumps({"complejidad": "simple", "criterios_exito": ["x"], "pasos": []})
+    m = FakeMessenger()
+    app = make_app(settings, db, [plan_simple, "Respuesta del trabajo"], m)
+    m.updates = [msg(text="/estado", update_id=1), msg(text="hola", update_id=2)]
+    rep = app.run_once(60)
+    # /estado + "Trabajo #1 en cola" + resultado del trabajo = 3 mensajes enviados
+    assert len(m.sent) == 3
+    assert rep["sent"] == 3 and rep["send_failed"] == 0 and rep["outbox_pending"] == 0
+
+
+def test_run_report_shows_send_failures_and_pending(settings, db):
+    m = FakeMessenger(fail_times=10)
+    app = make_app(settings, db, [], m)
+    m.updates = [msg(text="/estado", update_id=1)]
+    rep = app.run_once(30)
+    assert rep["sent"] == 0 and rep["send_failed"] >= 1 and rep["outbox_pending"] == 1
+    assert "red caída" in rep["send_error"]
+
+
+def test_quota_notice_states_real_wait():
+    import time as _t
+    from agente.app import quota_notice
+    assert "unos 7 min" in quota_notice(_t.time() + 7 * 60)
+    assert "unas 3 h" in quota_notice(_t.time() + 3 * 3600)
+    assert "por hoy" not in quota_notice(_t.time() + 60)

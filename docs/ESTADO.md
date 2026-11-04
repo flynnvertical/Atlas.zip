@@ -1,4 +1,4 @@
-# Registro de estado — 2026-11-04
+# Registro de estado — 2026-11-04 (actualizado tras el paquete de perfeccionamiento)
 
 ## Funciona y está comprobado (con evidencia en esta sesión)
 | Capacidad | Evidencia |
@@ -36,3 +36,21 @@
 4. OCR para PDF escaneados.
 5. Búsqueda semántica con embeddings (hoy BM25/FTS5, suficiente para memoria personal).
 6. Exponer herramientas vía MCP para reutilizarlas desde otros clientes.
+
+## Motores de modelo (estado real de las claves)
+| Orden | Motor | Secreto | Estado |
+|---|---|---|---|
+| 1 | Groq | `GROQ_API_KEY` | ✅ cargado |
+| 2 | OpenRouter `:free` | `OPENROUTER_API_KEY` | ✅ cargado |
+| 3 | Gemini (AI Studio) | `GEMINI_API_KEY` | ❌ **falta**: nunca se generó ni se compartió en la sesión de instalación. Debe generarla el dueño (Mariano) en aistudio.google.com → *Get API key*, sin activar facturación, y cargarla él mismo en Settings → Secrets → Actions. |
+| 4 | Mistral | `MISTRAL_API_KEY` | ❌ **mejora futura**: la cuenta nunca se creó; no se crean cuentas nuevas sin decisión del dueño. |
+
+Cadena efectiva hoy: **Groq → OpenRouter** (2 motores). El código ya soporta los 4: basta con cargar la
+clave para que el motor se sume a la cadena en la siguiente corrida, sin cambios de código.
+
+## Operación
+- Cron del agente: **cada 5 min** (mínimo de GitHub), con concurrencia `agente-estado` sin solapamientos.
+- El registro de cada corrida informa `sent` (todos los mensajes enviados en la pasada), `send_failed`,
+  `outbox_pending` y, si hubo, `send_error` (descripción de la API, sin contenido de mensajes).
+- La evaluación en vivo corre sólo cuando cambia el razonamiento del agente o a mano, para no gastar
+  el cupo diario gratuito del bot de producción.

@@ -5,7 +5,7 @@
 ```
  Android (Telegram)                    GitHub (repo público, USD 0)
  ┌──────────────┐  mensajes   ┌───────────────────────────────────────────────┐
- │  Tu chat con │ ──────────► │ Workflow "agente.yml" (cron cada 10 min o     │
+ │  Tu chat con │ ──────────► │ Workflow "agente.yml" (cron cada 5 min o      │
  │  el bot      │ ◄────────── │ ejecución manual)                             │
  └──────────────┘ resultados, │  1. restaura estado cifrado (rama agent-state)│
                   archivos,   │  2. lee mensajes nuevos (getUpdates)          │

@@ -9,7 +9,9 @@ Si alguna vez lo pegaste en un chat, revocalo cuando el bot funcione (@BotFather
 cargá el nuevo directamente como secreto.
 
 ### Autorizar tu cuenta (elegí una)
-- **A. Vinculación con código (no necesitás saber tu ID):** creá el secreto `AGENTE_PAIRING_CODE`
+- **A. Vinculación con código (no necesitás saber tu ID):** *(ya usada y cerrada en esta instalación; el
+  workflow dejó de leer el secreto. Para reinstalar desde cero, volvé a agregar
+  `AGENTE_PAIRING_CODE: ${{ secrets.AGENTE_PAIRING_CODE }}` al `env` de `agente.yml`.)* Creá el secreto `AGENTE_PAIRING_CODE`
   con una frase de al menos 8 caracteres. Cuando el agente esté corriendo, escribile al bot en chat
   privado `/vincular <tu frase>`. El primer código correcto te registra como dueño (queda guardado en
   el estado cifrado) y la vinculación se cierra para siempre. 5 intentos fallidos la bloquean.
@@ -41,7 +43,7 @@ respuesta en Telegram termina con `⚙️ Motor: …` indicando qué motor respo
 
 ## Paso 2 — Elegí dónde corre
 
-### Opción A — GitHub Actions (USD 0, desatendido, respuesta en ~10–30 min)
+### Opción A — GitHub Actions (USD 0, desatendido, respuesta en ~5–20 min)
 > Actions funciona desde la migración a `flynnvertical` (antes la cuenta `cargazul33` estaba bloqueada
 > por facturación). Los cron sólo corren desde la **rama por defecto** del repo.
 
@@ -54,7 +56,7 @@ respuesta en Telegram termina con `⚙️ Motor: …` indicando qué motor respo
    - `GROQ_API_KEY` (obligatoria salvo que uses `GEMINI_API_KEY` u `OPENROUTER_API_KEY`).
 2. Fusioná el PR en `main` y hacé que `main` sea la rama por defecto (Settings → General → Default branch); hoy la rama por defecto es `claude/instalarlo-3wdb8j`.
 3. Actions → *Agente (Telegram, ejecución programada)* → **Run workflow** para la primera prueba.
-4. Escribile a tu bot. El cron corre cada 10 min (GitHub puede demorarlo).
+4. Escribile a tu bot. El cron corre cada 5 min (GitHub puede demorarlo).
 
 ### Opción B — Render plan gratuito (USD 0, respuesta en segundos; ~1 min si estaba dormido)
 1. Creá un token *fine-grained* con permiso **Contents: Read and write** SÓLO sobre este repo

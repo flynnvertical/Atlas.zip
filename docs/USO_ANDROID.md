@@ -8,7 +8,7 @@ La interfaz es tu chat con el bot de Telegram. Escribí objetivos en lenguaje na
 - "Generá un informe.docx con el resumen y una tabla comparativa."
 
 El bot responde `📥 Trabajo #N en cola`, después (según la opción de despliegue: segundos o
-10–30 min) envía el resultado y los archivos generados. Cada resultado termina con:
+5–20 min) envía el resultado y los archivos generados. Cada resultado termina con:
 - `✅ Verificación superada` — pasaron los controles (fuentes realmente consultadas, archivos
   existentes, auditor conforme).
 - `⚠️ Verificación NO superada` + motivos — usalo con cautela.

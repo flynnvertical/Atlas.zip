@@ -7,7 +7,7 @@
 |---|---|---|
 | Código y librerías | 0 | Software libre (requests, bs4, lxml, pypdf, python-docx, openpyxl, cryptography) |
 | Telegram Bot API | 0 | Límites de envío de Telegram (≈30 msg/s; archivos de bots hasta 50 MB de subida, 20 MB de descarga) |
-| GitHub Actions (opción A) | 0 en repo **público** | Funciona en `flynnvertical` (verificado 2026-11-03). Cron mínimo 5 min y con demoras sin garantía; desactivación tras 60 días sin actividad; logs públicos (el agente sólo imprime métricas). En repo privado: 2.000 min/mes gratis → con cron cada 10 min se excede (≈4.300 min); usar cada 30–60 min |
+| GitHub Actions (opción A) | 0 en repo **público** | Funciona en `flynnvertical` (verificado 2026-11-03). Cron mínimo 5 min y con demoras sin garantía; desactivación tras 60 días sin actividad; logs públicos (el agente sólo imprime métricas). Cron cada 5 min (≈8.600 corridas/mes, gratis sólo porque el repo es **público**). Si el repo pasara a privado: 2.000 min/mes gratis → hay que subir el intervalo a 30–60 min |
 | ~~GitHub Models~~ | — | **Retirado por GitHub el 2026-07-30**; no usar |
 | Groq (primario) | 0 | Por modelo: ~8.000 tokens/min y cupo diario de tokens en ventana móvil de 24 h (medido: ~2–3 evaluaciones completas por día) |
 | OpenRouter `:free` (respaldo) | 0 **sin comprar créditos** | 50 pedidos/día y 20/min (con compra de USD 10 sube a 1.000/día: **no permitido** por la regla USD 0) |
@@ -32,5 +32,5 @@ proveedores de respaldo (cada uno suma su cuota) o un modelo local con Ollama en
 - Sin navegador con JavaScript: páginas que requieren JS o login no se leen (sí HTML estático, PDF, JSON y APIs).
 - La búsqueda gratuita (DuckDuckGo HTML) puede bloquear IPs de centros de datos; entonces cae a Wikipedia. Para búsquedas generales confiables: SearXNG propio o Brave Search API (`BRAVE_API_KEY`, plan gratuito con límite mensual).
 - PDF escaneados: no hay OCR (se avisa).
-- Latencia en opción A: 10–30 min por respuesta. No es un chat en tiempo real.
+- Latencia en opción A: cron cada 5 min (mínimo de GitHub); en la práctica ~5–20 min por respuesta según la demora de GitHub. No es un chat en tiempo real.
 - No hay envío de correos ni compras: cualquier acción externa pasa por `http_request` con aprobación.

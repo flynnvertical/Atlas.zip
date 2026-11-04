@@ -3,7 +3,7 @@ name: CI + evaluación en vivo
 on:
   push:
     branches-ignore: [agent-state]
-    paths: ["agente/**", "tests/**", "scripts/**", "requirements*.txt", ".github/workflows/ci.yml"]
+    paths: ["agente/**", "tests/**", "scripts/**", "requirements*.txt", ".github/workflows/*.yml"]
   workflow_dispatch:
     inputs:
       only:
@@ -68,6 +68,38 @@ jobs:
           fi
 
   # Verifica el token del bot con getMe (no lee ni consume mensajes; imprime sólo el @usuario).
+  # La evaluación en vivo gasta gran parte del cupo DIARIO gratuito de los motores (OpenRouter: 50
+  # pedidos/día) y deja al bot de producción sin cuota (ocurrió el 2026-11-04). Por eso corre sólo
+  # cuando cambia algo que afecta el razonamiento del agente, o a mano (workflow_dispatch). Las
+  # pruebas deterministas corren siempre.
+  alcance:
+    runs-on: ubuntu-latest
+    outputs:
+      evaluar: ${{ steps.diff.outputs.evaluar }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "evaluar=true" >> "$GITHUB_OUTPUT"; echo "Ejecución manual: se evalúa en vivo"; exit 0
+          fi
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+          fi
+          CAMBIOS=$(git diff --name-only "$BEFORE" HEAD 2>/dev/null || echo "TODO")
+          echo "Archivos cambiados:"; echo "$CAMBIOS"
+          if [ "$CAMBIOS" = "TODO" ] || echo "$CAMBIOS" | grep -qE '^(agente/(agent|llm|verify|memory|security|state_store|sandbox_boot)\.py|agente/tools/|scripts/live_eval\.py|requirements\.txt)'; then
+            echo "evaluar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "evaluar=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Evaluación en vivo no requerida: el cambio no afecta el razonamiento del agente (se preserva la cuota del bot)."
+            echo "## Evaluación en vivo: no requerida en este push" >> "$GITHUB_STEP_SUMMARY"
+            echo "El cambio no toca agente, modelos, herramientas, memoria ni estado. Se puede lanzar a mano con *Run workflow*." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   telegram:
     needs: pruebas
     runs-on: ubuntu-latest
@@ -88,8 +120,8 @@ jobs:
           grep -q '"telegram_bot": "@' /tmp/doctor.json
 
   en-vivo:
-    needs: [pruebas, proveedor]
-    if: needs.proveedor.outputs.ok == 'true'
+    needs: [pruebas, proveedor, alcance]
+    if: needs.proveedor.outputs.ok == 'true' && needs.alcance.outputs.evaluar == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -112,8 +144,8 @@ jobs:
   # Persistencia real entre DOS runners distintos usando el mismo mecanismo que el despliegue
   # (estado cifrado en una rama git). Datos de prueba no sensibles; la rama se borra al final.
   persistencia-1:
-    needs: [pruebas, proveedor, en-vivo]   # en serie: comparten la cuota por minuto del proveedor
-    if: always() && needs.pruebas.result == 'success' && needs.proveedor.outputs.ok == 'true'
+    needs: [pruebas, proveedor, alcance, en-vivo]   # en serie: comparten la cuota por minuto del proveedor
+    if: always() && needs.pruebas.result == 'success' && needs.proveedor.outputs.ok == 'true' && needs.alcance.outputs.evaluar == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions: {contents: write}

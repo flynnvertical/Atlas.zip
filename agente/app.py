@@ -34,12 +34,28 @@ documentos, analizar archivos que me envíes...).
 /id – tu identificador de Telegram"""
 
 
+def quota_notice(paused_until: float) -> str:
+    """Aviso de cuota con la espera real (antes decía "por hoy" aunque la pausa fuera de minutos)."""
+    mins = max(1, round((paused_until - time.time()) / 60))
+    espera = f"unos {mins} min" if mins < 90 else f"unas {round(mins / 60)} h"
+    return (f"⏸️ Los motores gratuitos están sin cuota por ahora. Reanudo en {espera}; "
+            "tus trabajos quedan en cola y no se pierden.")
+
+
 class Outbox:
     """Cola de salida persistente: los resultados no se pierden si falla el envío."""
 
     def __init__(self, db: DB, messenger=None):
         self.db = db
         self.messenger = messenger
+        # Totales de toda la pasada: cada flush() suma (antes el registro sólo mostraba la última tanda
+        # y reportaba "sent: 0" aunque las respuestas sí salían).
+        self.sent_total = 0
+        self.failed_total = 0
+        self.last_error: str | None = None
+
+    def pending(self) -> int:
+        return self.db.one("SELECT COUNT(*) c FROM outbox WHERE status='pending'")["c"]
 
     def put(self, chat_id: int, text: str | None = None, file_path: str | None = None) -> None:
         self.db.execute("INSERT INTO outbox(chat_id,text,file_path,created) VALUES(?,?,?,?)",
@@ -58,11 +74,14 @@ class Outbox:
                     self.messenger.send_message(r["chat_id"], r["text"] or "")
                 self.db.execute("UPDATE outbox SET status='sent', attempts=attempts+1 WHERE id=?", (r["id"],))
                 sent += 1
+                self.sent_total += 1
             except Exception as e:  # noqa: BLE001
                 st = "failed" if r["attempts"] + 1 >= 5 else "pending"
                 self.db.execute("UPDATE outbox SET status=?, attempts=attempts+1 WHERE id=?", (st, r["id"]))
                 self.db.log("warn", "send_failed", redact(str(e))[:300])
                 failed += 1
+                self.failed_total += 1
+                self.last_error = redact(str(e))[:120]  # descripción de la API, sin contenido del mensaje
         return sent, failed
 
 
@@ -293,8 +312,7 @@ class App:
                 self.db.log("warn", "quota", str(e)[:300], job["id"])
                 if not self.db.kv_get(f"quota_warned:{time.strftime('%Y-%m-%d')}"):
                     self.db.kv_set(f"quota_warned:{time.strftime('%Y-%m-%d')}", "1")
-                    self.outbox.put(job["chat_id"], "⏸️ Cuota gratuita del modelo agotada por hoy. "
-                                    "Los trabajos quedan en cola y se reanudan automáticamente.")
+                    self.outbox.put(job["chat_id"], quota_notice(stats["paused_until"]))
                 break
             except Exception as e:  # noqa: BLE001 - error inesperado: registrar y seguir con otros
                 self.db.log("error", "job_crash", f"{type(e).__name__}: {redact(str(e))[:300]}", job["id"])
@@ -357,8 +375,11 @@ class App:
         self.outbox.flush()
         report["scheduled"] = len(run_due_schedules(self.db, self.s.timezone))
         report.update(self.process_jobs(deadline))
-        sent, failed = self.outbox.flush()
-        report.update({"sent": sent, "send_failed": failed, "seconds": round(time.time() - t0, 1)})
+        self.outbox.flush()
+        report.update({"sent": self.outbox.sent_total, "send_failed": self.outbox.failed_total,
+                       "outbox_pending": self.outbox.pending(), "seconds": round(time.time() - t0, 1)})
+        if self.outbox.last_error:
+            report["send_error"] = self.outbox.last_error
         if report["updates"] or report["scheduled"] or report["done"] or report["failed"] or report.get("poll_error"):
             self.db.log("info", "run_once", report)  # corridas vacías no modifican el estado
         self.maintenance()
